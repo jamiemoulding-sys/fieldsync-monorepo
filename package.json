@@ -1,4 +1,10 @@
 {
+  "private": true,
+  "workspaces": [
+  "Backend/FieldSync-Backend",
+  "shared",
+  "Mobile/fieldsync-mobile"
+],
   "devDependencies": {
     "supabase": "^2.98.2"
   }

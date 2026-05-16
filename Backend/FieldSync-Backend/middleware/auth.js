@@ -21,12 +21,8 @@ const authenticateToken = async (
   next
 ) => {
   try {
-    console.log('🔐 AUTH MIDDLEWARE: Starting authentication');
-    
     const authHeader =
       req.headers.authorization;
-
-    console.log('🔐 AUTH MIDDLEWARE: Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
 
     if (
       !authHeader ||
@@ -34,7 +30,6 @@ const authenticateToken = async (
         "Bearer "
       )
     ) {
-      console.log('🔐 AUTH MIDDLEWARE: No token provided or invalid format');
       return res.status(401).json({
         error: "No token provided",
       });
@@ -43,21 +38,17 @@ const authenticateToken = async (
     const token =
       authHeader.split(" ")[1];
 
-    console.log('🔐 AUTH MIDDLEWARE: Token extracted:', token ? token.substring(0, 20) + '...' : 'null');
-
     if (
       !token ||
       token === "undefined" ||
       token === "null"
     ) {
-      console.log('🔐 AUTH MIDDLEWARE: Invalid token value');
       return res.status(401).json({
         error: "Invalid token",
       });
     }
 
     /* VERIFY SUPABASE TOKEN */
-    console.log('🔐 AUTH MIDDLEWARE: Verifying Supabase token...');
     const {
       data,
       error,
@@ -66,13 +57,10 @@ const authenticateToken = async (
         token
       );
 
-    console.log('🔐 AUTH MIDDLEWARE: Supabase response - error:', error, 'data.user:', !!data?.user);
-
     if (
       error ||
       !data?.user
     ) {
-      console.log('🔐 AUTH MIDDLEWARE: Supabase verification failed');
       return res.status(401).json({
         error:
           "Unauthorized",
@@ -82,10 +70,7 @@ const authenticateToken = async (
     const authUser =
       data.user;
 
-    console.log('🔐 AUTH MIDDLEWARE: Supabase user ID:', authUser.id);
-
     /* GET LIVE USER FROM DB */
-    console.log('🔐 AUTH MIDDLEWARE: Querying database for user...');
     const result =
       await query(
         `
@@ -105,19 +90,14 @@ const authenticateToken = async (
         [authUser.id]
       );
 
-    console.log('🔐 AUTH MIDDLEWARE: Database query result rows:', result.rows.length);
-
     const user =
       result.rows[0];
 
     if (!user) {
-      console.log('🔐 AUTH MIDDLEWARE: User not found in database');
       return res.status(401).json({
         error: "User not found",
       });
     }
-
-    console.log('🔐 AUTH MIDDLEWARE: User found - ID:', user.id, 'email:', user.email, 'company_id:', user.company_id);
 
     let finalRole =
       user.role ||
@@ -140,7 +120,6 @@ const authenticateToken = async (
         finalRole =
           user.temp_role;
       } else {
-        console.log('🔐 AUTH MIDDLEWARE: Temp role expired, clearing...');
         await query(
           `
           UPDATE users
@@ -170,19 +149,16 @@ const authenticateToken = async (
         user.is_pro || false,
     };
 
-    console.log('🔐 AUTH MIDDLEWARE: Authentication successful - req.user:', JSON.stringify(req.user));
     next();
   } catch (err) {
     console.error(
-      "🔐 AUTH ERROR:",
-      err.message,
-      err.stack
+      "AUTH ERROR:",
+      err.message
     );
 
     return res.status(401).json({
       error:
         "Authentication failed",
-      details: err.message,
     });
   }
 };

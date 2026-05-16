@@ -164,7 +164,7 @@ router.post(
             u.role,
             u.company_id,
             u.job_title,
-            u.created_at,
+            u.last_sign_in,
 
             COALESCE(c.name,'') AS company_name,
             COALESCE(c.is_pro,false) AS is_pro,
@@ -211,13 +211,13 @@ router.post(
       await query(
         `
         UPDATE users
-        SET created_at = NOW()
+        SET last_sign_in = NOW()
         WHERE id = $1
         `,
         [user.id]
       );
 
-      user.created_at =
+      user.last_sign_in =
         new Date();
 
       const token =
@@ -251,8 +251,8 @@ router.post(
             user.current_plan,
           subscription_status:
             user.subscription_status,
-          created_at:
-            user.created_at,
+          last_sign_in:
+            user.last_sign_in,
         },
       });
     } catch (error) {
@@ -356,7 +356,7 @@ router.post(
             phone,
             company_id,
             role,
-            created_at
+            last_sign_in
           )
           VALUES
           (
@@ -406,8 +406,8 @@ router.post(
             "free",
           subscription_status:
             "free",
-          created_at:
-            user.created_at,
+          last_sign_in:
+            user.last_sign_in,
         },
       });
     } catch (error) {
@@ -444,30 +444,9 @@ router.get(
   authenticateToken,
   async (req, res) => {
     try {
-      console.log('📋 /api/auth/me: Starting profile fetch');
-      console.log('📋 /api/auth/me: req.user:', JSON.stringify(req.user));
-      console.log('📋 /api/auth/me: req.user.id:', req.user.id);
-
-      if (!req.user) {
-        console.log('📋 /api/auth/me: ERROR - req.user is undefined');
-        return res.status(500).json({
-          success: false,
-          error: "req.user is undefined",
-          debug: { reqUser: req.user }
-        });
-      }
-
-      if (!req.user.id) {
-        console.log('📋 /api/auth/me: ERROR - req.user.id is undefined');
-        return res.status(500).json({
-          success: false,
-          error: "req.user.id is undefined",
-          debug: { reqUser: req.user }
-        });
-      }
-
-      console.log('📋 /api/auth/me: Executing database query...');
-      const queryText = `
+      const result =
+        await query(
+          `
           SELECT
             u.id,
             u.email,
@@ -476,7 +455,7 @@ router.get(
             u.role,
             u.company_id,
             u.job_title,
-            u.created_at,
+            u.last_sign_in,
 
             COALESCE(c.name,'') AS company_name,
             COALESCE(c.is_pro,false) AS is_pro,
@@ -489,65 +468,17 @@ router.get(
 
           WHERE u.id = $1
           LIMIT 1
-          `;
-      
-      console.log('📋 /api/auth/me: Query text:', queryText);
-      console.log('📋 /api/auth/me: Query params:', [req.user.id]);
-
-      console.log('RUNNING QUERY...');
-      console.log(queryText);
-      console.log([req.user.id]);
-
-      const result =
-        await query(
-          queryText,
+          `,
           [req.user.id]
         );
 
-      console.log('QUERY RESULT:', result);
-
-      console.log('📋 /api/auth/me: Query result rows:', result.rows.length);
-      console.log('📋 /api/auth/me: Query result:', JSON.stringify(result.rows));
-
-      if (!result.rows || result.rows.length === 0) {
-        console.log('📋 /api/auth/me: ERROR - No user found in database');
-        return res.status(404).json({
-          success: false,
-          error: "User not found in database",
-          userId: req.user.id
-        });
-      }
-
-      const profile = result.rows[0];
-      
-      if (!profile) {
-        console.log('📋 /api/auth/me: ERROR - profile is null/undefined');
-        return res.status(500).json({
-          success: false,
-          error: "profile is null/undefined",
-          debug: { resultRows: result.rows }
-        });
-      }
-
-      console.log('📋 /api/auth/me: Profile data:', JSON.stringify(profile));
-      console.log('PROFILE RESPONSE:', profile);
-
-      res.json(profile);
+      res.json(
+        result.rows[0]
+      );
     } catch (error) {
-      console.error('📋 /api/auth/me: ERROR:', error.message);
-      console.error('📋 /api/auth/me: ERROR stack:', error.stack);
-      console.error('📋 /api/auth/me: ERROR details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-        code: error.code,
-        detail: error.detail
-      });
-
       res.status(500).json({
-        success: false,
-        message: error.message,
-        stack: error.stack
+        error:
+          error.message,
       });
     }
   }

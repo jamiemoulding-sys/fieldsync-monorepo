@@ -1,0 +1,458 @@
+# Kubernetes Deployment Configuration
+# For production deployment with horizontal scaling
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: attendance-api
+  namespace: attendance
+  labels:
+    app: attendance-api
+    version: v1
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: attendance-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: attendance-api
+        version: v1
+    spec:
+      containers:
+      - name: attendance-api
+        image: attendance-api:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: attendance-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: attendance-secrets
+              key: redis-url
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: attendance-secrets
+              key: jwt-secret
+        - name: LOG_LEVEL
+          value: "info"
+        - name: MAX_CONNECTIONS
+          value: "200"
+        - name: CACHE_TTL
+          value: "3600"
+        - name: RATE_LIMIT_WINDOW
+          value: "900000"
+        - name: RATE_LIMIT_MAX
+          value: "100"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            httpGet:
+              path: /health
+              port: 3000
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        capabilities:
+          drop:
+          - ALL
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: attendance-api-service
+  namespace: attendance
+  labels:
+    app: attendance-api
+spec:
+  selector:
+    app: attendance-api
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: attendance-api-hpa
+  namespace: attendance
+  labels:
+    app: attendance-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: attendance-api
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+      selectPolicy: Max
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: attendance-config
+  namespace: attendance
+  labels:
+    app: attendance-api
+data:
+  app.json: |
+    {
+      "name": "attendance-api",
+      "version": "1.0.0",
+      "environment": "production",
+      "database": {
+        "max_connections": 200,
+        "connection_timeout": 2000,
+        "idle_timeout": 30000
+      },
+      "redis": {
+        "ttl": 3600,
+        "max_retries": 3,
+        "retry_delay": 100
+      },
+      "jwt": {
+        "expires_in": "12h",
+        "algorithm": "HS256"
+      },
+      "rate_limiting": {
+        "window": 900000,
+        "max_requests": 100
+      },
+      "logging": {
+        "level": "info",
+        "format": "json"
+      },
+      "monitoring": {
+        "metrics_path": "/metrics",
+        "health_path": "/health"
+      }
+    }
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: attendance-secrets
+  namespace: attendance
+  labels:
+    app: attendance-api
+type: Opaque
+data:
+  # Base64 encoded values
+  database-url: cG9zdGdyZXNxbDovL2F0dGVuZGFuY2VfdXNlcjpwYXNzd29yZEBkYi5leGFtcGxlLmNvbTo1NDMyL2F0dGVuZGFuY2U=
+  redis-url: cmVkaXM6OmF1dGhfdG9rZW5AcmVkaXMuZXhhbXBsZS5jb206NjM3OQ==
+  jwt-secret: c3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLXByb2R1Y3Rpb24tdXNlLW9ubHk=
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: attendance-api-ingress
+  namespace: attendance
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  tls:
+  - hosts:
+    - api.fieldsync.com
+    secretName: attendance-api-tls
+  rules:
+  - host: api.fieldsync.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: attendance-api-service
+            port:
+              number: 80
+
+---
+apiVersion: v1
+kind: ServiceMonitor
+metadata:
+  name: attendance-api-monitor
+  namespace: attendance
+  labels:
+    app: attendance-api
+spec:
+  selector:
+    matchLabels:
+      app: attendance-api
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: attendance-api-pdb
+  namespace: attendance
+  labels:
+    app: attendance-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: attendance-api
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: attendance-api-limits
+  namespace: attendance
+spec:
+  limits:
+  - default:
+      cpu: 250m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+    type: Container
+  - max:
+      cpu: 500m
+      memory: 1Gi
+    min:
+      cpu: 100m
+      memory: 128Mi
+    type: Container
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: attendance-api-quota
+  namespace: attendance
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    persistentvolumeclaims: "0"
+    services: "10"
+    secrets: "10"
+    configmaps: "10"
+    count/pods: "20"
+
+---
+apiVersion: v1
+kind: NetworkPolicy
+metadata:
+  name: attendance-api-netpol
+  namespace: attendance
+spec:
+  podSelector:
+    matchLabels:
+      app: attendance-api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - podSelector:
+        matchLabels:
+          app: attendance-api
+  - ports:
+    - protocol: TCP
+      port: 3000
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          app: attendance-api
+  - ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 6379
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: attendance-api-node-exporter
+  namespace: attendance
+  labels:
+    app: attendance-api
+    component: node-exporter
+spec:
+  selector:
+    matchLabels:
+      app: attendance-api-node-exporter
+  template:
+    metadata:
+      labels:
+        app: attendance-api-node-exporter
+        component: node-exporter
+    spec:
+      containers:
+      - name: node-exporter
+        image: prom/node-exporter:latest
+        ports:
+        - containerPort: 9100
+          name: metrics
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - SYS_TIME
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: attendance-api-cleanup
+  namespace: attendance
+  labels:
+    app: attendance-api
+    component: cleanup
+spec:
+  schedule: "0 2 * * *"  # Run at 2 AM daily
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cleanup
+            image: attendance-api:latest
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              echo "Starting cleanup job..."
+              # Cleanup expired sessions
+              curl -X POST http://attendance-api-service/cleanup \
+                -H "Authorization: Bearer $CLEANUP_TOKEN" \
+                -H "Content-Type: application/json"
+              echo "Cleanup job completed"
+            env:
+            - name: CLEANUP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: attendance-secrets
+                  key: cleanup-token
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+          restartPolicy: OnFailure
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1

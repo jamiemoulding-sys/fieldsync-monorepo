@@ -1,12 +1,15 @@
 {
   "private": true,
   "workspaces": [
-  "Backend/FieldSync-Backend",
-  "shared",
-  "Frontend/fieldsync-frontend",
-  "Mobile/fieldsync-mobile"
-],
+    "Backend/FieldSync-Backend",
+    "shared",
+    "Frontend/fieldsync-frontend",
+    "Mobile/fieldsync-mobile"
+  ],
   "devDependencies": {
     "supabase": "^2.98.2"
+  },
+  "dependencies": {
+    "ws": "^8.20.1"
   }
 }

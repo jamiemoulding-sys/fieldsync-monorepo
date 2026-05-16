@@ -3,6 +3,7 @@
   "workspaces": [
   "Backend/FieldSync-Backend",
   "shared",
+  "Frontend/fieldsync-frontend",
   "Mobile/fieldsync-mobile"
 ],
   "devDependencies": {

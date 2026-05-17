@@ -8,6 +8,7 @@ const {
 } = require("../middleware/auth");
 
 const { createClient } = require("@supabase/supabase-js");
+const ws = require("ws");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -15,11 +16,11 @@ const supabase = createClient(
   {
     auth: {
       persistSession: false,
-      autoRefreshToken: false
+      autoRefreshToken: false,
     },
     realtime: {
-      enabled: false
-    }
+      transport: ws,
+    },
   }
 );
 

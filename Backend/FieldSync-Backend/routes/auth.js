@@ -3,7 +3,7 @@ console.log("🔥 AUTH ROUTES LOADED");
 const express = require("express");
 const router = express.Router();
 const ws = require("ws");
-
+const { createClient } = require("@supabase/supabase-js");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 

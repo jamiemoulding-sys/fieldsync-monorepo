@@ -16,7 +16,7 @@ export async function getShifts() {
     .from("shifts")
     .select(`
       *,
-      locations (
+      locations!shifts_location_id_fkey (
         id,
         name
       )
@@ -30,5 +30,6 @@ export async function getShifts() {
     return [];
   }
 
+  console.log("GET SHIFTS SUCCESS:", data?.length || 0, "shifts loaded");
   return data || [];
 }

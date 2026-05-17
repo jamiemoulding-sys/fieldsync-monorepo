@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, FlatList } from "react-native";
 import { useEffect, useState } from "react";
-import { getShifts } from "../../utils/shiftsStorage";
+import { getShifts } from "../../utils/shifts";
 
 export default function Shifts() {
   const [shifts, setShifts] = useState([]);

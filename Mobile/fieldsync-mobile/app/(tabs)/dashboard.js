@@ -3,7 +3,7 @@ import { getShifts } from "../../utils/shifts";
 import { supabase } from "../../utils/supabase";
 import { startShift, endShift, getActiveShift } from "../../utils/shiftsStorage";
 import { startTracking, stopTracking } from "../../utils/locationTracking";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   View,
@@ -45,184 +45,194 @@ export default function Dashboard() {
 
   const scale = useRef(new Animated.Value(1)).current;
 
-  useEffect(() => {
-    load();
-  }, []);
-
-  async function load() {
+  const load = useCallback(async () => {
+    if (loading) return;
+    console.log("Dashboard fetch started");
+    
     setLoading(true);
 
-    const now = new Date();
-    const nowISO = now.toISOString();
-
-    const today = await getTodayShift();
-    const history = await getShifts();
-
-    setTodayShift(today);
-
-    // Load local cached state temporarily during loading
-    const localActiveShift = await getActiveShift();
-    if (localActiveShift) {
-      setCurrentShiftId(localActiveShift.id);
-      setLocationId(localActiveShift.location_id);
-      setWorking(true);
-      setCheckedIn(true);
-      setOnBreak(!!localActiveShift.break_started_at);
-      
-      if (localActiveShift.break_started_at) {
-        const breakStart = new Date(localActiveShift.break_started_at);
-        const elapsedSeconds = Math.floor((new Date() - breakStart) / 1000);
-        setSeconds(elapsedSeconds);
-      }
-    }
-
-    // Hydrate state from backend when online (replaces local state)
     try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token;
-      if (token) {
-        const { data: state } = await API.get('/shifts/state', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+      const now = new Date();
+      const nowISO = now.toISOString();
+
+      const today = await getTodayShift();
+      const history = await getShifts();
+
+      setTodayShift(today);
+
+      // Load local cached state temporarily during loading
+      const localActiveShift = await getActiveShift();
+      if (localActiveShift) {
+        setCurrentShiftId(localActiveShift.id);
+        setLocationId(localActiveShift.location_id);
+        setWorking(true);
+        setCheckedIn(true);
+        setOnBreak(!!localActiveShift.break_started_at);
         
-        if (state?.active_shift) {
-          setCurrentShiftId(state.active_shift.id);
-          setLocationId(state.active_shift.location_id);
-          setWorking(true);
-          setCheckedIn(true);
-          setOnBreak(state.on_break || false);
-          
-          // Hydrate break timer from backend state
-          if (state.on_break && state.active_shift.break_started_at) {
-            const breakStart = new Date(state.active_shift.break_started_at);
-            const elapsedSeconds = Math.floor((new Date() - breakStart) / 1000);
-            setSeconds(elapsedSeconds);
-          }
-        } else {
-          // Backend says no active shift, clear local state
-          setCurrentShiftId(null);
-          setLocationId(null);
-          setWorking(false);
-          setCheckedIn(false);
-          setOnBreak(false);
-          setSeconds(0);
+        if (localActiveShift.break_started_at) {
+          const breakStart = new Date(localActiveShift.break_started_at);
+          const elapsedSeconds = Math.floor((new Date() - breakStart) / 1000);
+          setSeconds(elapsedSeconds);
         }
       }
+
+      // Hydrate state from backend when online (replaces local state) - ONE TIME ONLY
+      try {
+        const token = (await supabase.auth.getSession()).data.session?.access_token;
+        if (token) {
+          const { data: state } = await API.get('/shifts/state', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          if (state?.active_shift) {
+            setCurrentShiftId(state.active_shift.id);
+            setLocationId(state.active_shift.location_id);
+            setWorking(true);
+            setCheckedIn(true);
+            setOnBreak(state.on_break || false);
+            
+            // Hydrate break timer from backend state
+            if (state.on_break && state.active_shift.break_started_at) {
+              const breakStart = new Date(state.active_shift.break_started_at);
+              const elapsedSeconds = Math.floor((new Date() - breakStart) / 1000);
+              setSeconds(elapsedSeconds);
+            }
+          } else {
+            // Backend says no active shift, clear local state
+            setCurrentShiftId(null);
+            setLocationId(null);
+            setWorking(false);
+            setCheckedIn(false);
+            setOnBreak(false);
+            setSeconds(0);
+          }
+        }
+      } catch (err) {
+        console.log('Backend state sync failed, using local state:', err.message);
+        // Don't retry - use local state and continue
+      }
+
+      const userRes = await supabase.auth.getUser();
+      const user = userRes?.data?.user;
+
+      if (user) {
+        const { data: shifts } = await supabase
+          .from("schedules")
+          .select(`*, locations(name)`)
+          .eq("user_id", user.id)
+          .gte("start_time", nowISO)
+          .order("start_time", { ascending: true })
+          .limit(1);
+
+        setNextShift(shifts?.[0] || null);
+
+        const { data: holidays } = await supabase
+          .from("holiday_requests")
+          .select("*")
+          .eq("user_id", user.id)
+          .gte("start_date", nowISO.split("T")[0])
+          .order("start_date", { ascending: true })
+          .limit(1);
+
+        setNextHoliday(holidays?.[0] || null);
+      }
+
+      // HOURS
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+
+      const weekShifts =
+        history?.filter(
+          (s) =>
+            s.clock_in_time &&
+            new Date(s.clock_in_time) > weekAgo
+        ) || [];
+
+      let hours = 0;
+      weekShifts.forEach((s) => {
+        if (!s.clock_out_time) return;
+
+        hours +=
+          (new Date(s.clock_out_time) -
+            new Date(s.clock_in_time)) /
+          3600000;
+      });
+
+      setEarnings(Math.round(hours * 10));
+
+      // STREAK
+      let currentStreak = 0;
+      let checkDate = new Date();
+
+      for (let i = 0; i < 30; i++) {
+        const dateStr = checkDate.toISOString().split("T")[0];
+
+        const worked = history.some(
+          (s) =>
+            s.clock_in_time &&
+            s.clock_in_time.startsWith(dateStr)
+        );
+
+        if (worked) {
+          currentStreak++;
+          checkDate.setDate(checkDate.getDate() - 1);
+        } else break;
+      }
+
+      setStreak(currentStreak);
+
+      // PERFORMANCE
+      let late = 0;
+      let missed = 0;
+
+      history.forEach((s) => {
+        if (s.is_late) late++;
+        if (!s.clock_in_time) missed++;
+      });
+
+      let score = 100 - late * 5 - missed * 10;
+      if (score < 0) score = 0;
+
+      setPerformance(score);
+
+      // AI INSIGHT
+      const shift = today || nextShift;
+
+      let message = "✅ You're performing well";
+
+      if (missed >= 2) message = "⚠️ Missed shifts detected";
+      else if (late >= 3) message = "⚠️ Lateness trend building";
+      else if (hours > 45) message = "⚠️ High workload this week";
+      else if (currentStreak >= 5)
+        message = "🔥 Strong work streak";
+
+      if (shift?.locations) {
+        const start = new Date(shift.start_time);
+        const travelMinutes = 30;
+
+        const leaveTime = new Date(
+          start.getTime() - travelMinutes * 60000
+        );
+
+        message += ` • Leave by ${leaveTime.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`;
+      }
+
+      setInsight(message);
+      
+      console.log("Dashboard fetch completed");
     } catch (err) {
-      console.log('Backend state sync failed, using local state:', err.message);
+      console.error("Dashboard fetch error:", err.message);
+    } finally {
+      setLoading(false);
     }
+  }, []); // Empty dependency array - only run once on mount
 
-    const userRes = await supabase.auth.getUser();
-    const user = userRes?.data?.user;
-
-    if (user) {
-      const { data: shifts } = await supabase
-        .from("schedules")
-        .select(`*, locations(name)`)
-        .eq("user_id", user.id)
-        .gte("start_time", nowISO)
-        .order("start_time", { ascending: true })
-        .limit(1);
-
-      setNextShift(shifts?.[0] || null);
-
-      const { data: holidays } = await supabase
-        .from("holiday_requests")
-        .select("*")
-        .eq("user_id", user.id)
-        .gte("start_date", nowISO.split("T")[0])
-        .order("start_date", { ascending: true })
-        .limit(1);
-
-      setNextHoliday(holidays?.[0] || null);
-    }
-
-    // HOURS
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-
-    const weekShifts =
-      history?.filter(
-        (s) =>
-          s.clock_in_time &&
-          new Date(s.clock_in_time) > weekAgo
-      ) || [];
-
-    let hours = 0;
-    weekShifts.forEach((s) => {
-      if (!s.clock_out_time) return;
-
-      hours +=
-        (new Date(s.clock_out_time) -
-          new Date(s.clock_in_time)) /
-        3600000;
-    });
-
-    setEarnings(Math.round(hours * 10));
-
-    // STREAK
-    let currentStreak = 0;
-    let checkDate = new Date();
-
-    for (let i = 0; i < 30; i++) {
-      const dateStr = checkDate.toISOString().split("T")[0];
-
-      const worked = history.some(
-        (s) =>
-          s.clock_in_time &&
-          s.clock_in_time.startsWith(dateStr)
-      );
-
-      if (worked) {
-        currentStreak++;
-        checkDate.setDate(checkDate.getDate() - 1);
-      } else break;
-    }
-
-    setStreak(currentStreak);
-
-    // PERFORMANCE
-    let late = 0;
-    let missed = 0;
-
-    history.forEach((s) => {
-      if (s.is_late) late++;
-      if (!s.clock_in_time) missed++;
-    });
-
-    let score = 100 - late * 5 - missed * 10;
-    if (score < 0) score = 0;
-
-    setPerformance(score);
-
-    // AI INSIGHT
-    const shift = today || nextShift;
-
-    let message = "✅ You're performing well";
-
-    if (missed >= 2) message = "⚠️ Missed shifts detected";
-    else if (late >= 3) message = "⚠️ Lateness trend building";
-    else if (hours > 45) message = "⚠️ High workload this week";
-    else if (currentStreak >= 5)
-      message = "🔥 Strong work streak";
-
-    if (shift?.locations) {
-      const start = new Date(shift.start_time);
-      const travelMinutes = 30;
-
-      const leaveTime = new Date(
-        start.getTime() - travelMinutes * 60000
-      );
-
-      message += ` • Leave by ${leaveTime.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      })}`;
-    }
-
-    setInsight(message);
-
-    setLoading(false);
-  }
+  useEffect(() => {
+    load();
+  }, [load]);
 
   function getCountdown(shift) {
     if (!shift) return null;

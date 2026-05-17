@@ -4,17 +4,19 @@ const { query } = require("../database/connection");
 SUPABASE ADMIN CLIENT
 =================================== */
 
+const ws = require("ws");
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   {
     auth: {
       persistSession: false,
-      autoRefreshToken: false
+      autoRefreshToken: false,
     },
     realtime: {
-      enabled: false
-    }
+      transport: ws,
+    },
   }
 );
 
@@ -47,6 +49,8 @@ const authenticateToken = async (
 
     const token =
       authHeader.split(" ")[1];
+
+    console.log("TOKEN RECEIVED");
 
     console.log("TOKEN RECEIVED");
 

@@ -2,6 +2,7 @@ console.log("🔥 AUTH ROUTES LOADED");
 
 const express = require("express");
 const router = express.Router();
+const ws = require("ws");
 
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -65,14 +66,18 @@ ADD BELOW router.put("/me"...)
 NO OTHER CHANGES
 ===================================== */
 
-const {
-  createClient,
-} = require("@supabase/supabase-js");
-
-/* put near top with other imports */
-const admin = createClient(
+const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    realtime: {
+      transport: ws,
+    },
+  }
 );
 
 /* =====================================
@@ -443,7 +448,13 @@ router.get(
   "/me",
   authenticateToken,
   async (req, res) => {
+    console.log("AUTH ME START");
+    console.log("AUTH USER:", req.user);
+    
     try {
+      console.log("BEFORE DB QUERY");
+      const startTime = Date.now();
+      
       const result =
         await query(
           `
@@ -455,12 +466,27 @@ router.get(
             u.role,
             u.company_id,
             u.job_title,
-            u.last_sign_in,
+            u.created_at,
+            u.hourly_rate,
+            u.overtime_rate,
+            u.holiday_allowance,
+            u.payroll_id AS employee_id,
 
             COALESCE(c.name,'') AS company_name,
             COALESCE(c.is_pro,false) AS is_pro,
             COALESCE(c.current_plan,'free') AS current_plan,
-            COALESCE(c.subscription_status,'free') AS subscription_status
+            COALESCE(c.subscription_status,'free') AS subscription_status,
+
+            -- Calculate remaining holiday allowance
+            COALESCE(u.holiday_allowance, 20) - 
+            COALESCE(
+              (SELECT COUNT(*) 
+               FROM holidays h 
+               WHERE h.user_id = u.id 
+               AND h.status = 'approved'
+               AND h.start_date >= DATE_TRUNC('year', CURRENT_DATE)
+              ), 0
+            ) AS holiday_remaining
 
           FROM users u
           LEFT JOIN companies c
@@ -471,11 +497,16 @@ router.get(
           `,
           [req.user.id]
         );
-
+      
+      const queryDuration = Date.now() - startTime;
+      console.log("AFTER DB QUERY - Duration:", queryDuration, "ms");
+      console.log("SENDING RESPONSE");
+      
       res.json(
         result.rows[0]
       );
     } catch (error) {
+      console.error("AUTH ME ERROR:", error.message);
       res.status(500).json({
         error:
           error.message,

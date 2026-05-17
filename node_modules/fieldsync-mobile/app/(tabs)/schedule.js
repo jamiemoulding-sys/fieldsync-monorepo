@@ -9,7 +9,7 @@ import {
   ScrollView,
   TextInput,
 } from "react-native";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../../utils/supabase";
 import { getCurrentUser } from "../../utils/session";
@@ -29,14 +29,10 @@ export default function Schedule() {
   const [endDate, setEndDate] = useState(null);
   const [reason, setReason] = useState("");
 
-  useEffect(() => {
-    loadSchedule();
-  }, []);
-
-  /* =========================
-     LOAD DATA
-  ========================= */
-  async function loadSchedule() {
+  const loadSchedule = useCallback(async () => {
+    if (loading) return;
+    console.log("Schedule fetch started");
+    
     try {
       setLoading(true);
 
@@ -66,12 +62,17 @@ export default function Schedule() {
       });
 
       setShifts(merged);
+      console.log("Schedule fetch completed");
     } catch (err) {
-      console.log(err);
+      console.error("Schedule fetch error:", err.message);
     } finally {
       setLoading(false);
     }
-  }
+  }, []); // Empty dependency array - only run once on mount
+
+  useEffect(() => {
+    loadSchedule();
+  }, [loadSchedule]);
 
   /* =========================
      HOLIDAY SUBMIT (FIXED)

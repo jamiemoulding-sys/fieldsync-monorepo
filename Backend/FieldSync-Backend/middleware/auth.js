@@ -1,6 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
 const { query } = require("../database/connection");
-const ws = require("ws");
 /* ===================================
 SUPABASE ADMIN CLIENT
 =================================== */
@@ -9,9 +8,13 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   {
-    realtime: {
-      transport: ws,
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
     },
+    realtime: {
+      enabled: false
+    }
   }
 );
 
@@ -25,6 +28,8 @@ const authenticateToken = async (
   res,
   next
 ) => {
+  console.log("AUTH MIDDLEWARE START");
+  
   try {
     const authHeader =
       req.headers.authorization;
@@ -42,6 +47,8 @@ const authenticateToken = async (
 
     const token =
       authHeader.split(" ")[1];
+
+    console.log("TOKEN RECEIVED");
 
     if (
       !token ||
@@ -74,6 +81,8 @@ const authenticateToken = async (
 
     const authUser =
       data.user;
+
+    console.log("SUPABASE USER:", authUser?.id);
 
     /* GET LIVE USER FROM DB */
     const result =
@@ -154,6 +163,8 @@ const authenticateToken = async (
         user.is_pro || false,
     };
 
+    console.log("AUTH MIDDLEWARE SUCCESS");
+    console.log("CALLING NEXT()");
     next();
   } catch (err) {
     console.error(

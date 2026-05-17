@@ -24,11 +24,15 @@ const pool = new Pool({
   }
 })();
 
-// 🔥 Query wrapper
+// 🔥 Query wrapper with timeout
 module.exports = {
   query: async (text, params) => {
     try {
-      return await pool.query(text, params);
+      const startTime = Date.now();
+      const result = await pool.query(text, params);
+      const duration = Date.now() - startTime;
+      console.log(`📊 Query completed in ${duration}ms`);
+      return result;
     } catch (err) {
       console.error("💥 QUERY ERROR:", err);
       throw err;

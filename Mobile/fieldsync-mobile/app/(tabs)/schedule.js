@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -17,6 +17,24 @@ import { getCurrentUser } from "../../utils/session";
 import { supabase } from "../../utils/supabase";
 
 const todayKey = new Date().toISOString().slice(0, 10);
+
+const calendarTheme = {
+  backgroundColor: "#0f172a",
+  calendarBackground: "#0f172a",
+  textSectionTitleColor: "#94a3b8",
+  selectedDayBackgroundColor: "#6366f1",
+  selectedDayTextColor: "#ffffff",
+  todayTextColor: "#a5b4fc",
+  dayTextColor: "#e5e7eb",
+  textDisabledColor: "#475569",
+  monthTextColor: "#ffffff",
+  arrowColor: "#a5b4fc",
+  dotColor: "#6366f1",
+  selectedDotColor: "#ffffff",
+  textDayFontWeight: "700",
+  textMonthFontWeight: "900",
+  textDayHeaderFontWeight: "800",
+};
 
 const toDateKey = (value) => {
   if (!value) return "";
@@ -178,10 +196,6 @@ export default function Schedule() {
       marks[date] = {
         marked: true,
         dotColor: "#6366f1",
-        customStyles: {
-          container: styles.markedDay,
-          text: styles.markedDayText,
-        },
       };
     });
 
@@ -273,32 +287,19 @@ export default function Schedule() {
         ) : null}
 
         <View style={styles.calendarCard}>
-          <Calendar
-            current={currentMonth}
-            markingType="custom"
-            markedDates={markedDates}
-            onDayPress={(day) => setSelectedDate(day.dateString)}
-            onMonthChange={(month) => setCurrentMonth(month.dateString)}
-            enableSwipeMonths
-            firstDay={1}
-            hideExtraDays={false}
-            style={styles.calendar}
-            theme={{
-              backgroundColor: "#0f172a",
-              calendarBackground: "#0f172a",
-              textSectionTitleColor: "#94a3b8",
-              selectedDayBackgroundColor: "#6366f1",
-              selectedDayTextColor: "#ffffff",
-              todayTextColor: "#a5b4fc",
-              dayTextColor: "#e5e7eb",
-              textDisabledColor: "#475569",
-              monthTextColor: "#ffffff",
-              arrowColor: "#a5b4fc",
-              textDayFontWeight: "700",
-              textMonthFontWeight: "900",
-              textDayHeaderFontWeight: "800",
-            }}
-          />
+          <CalendarBoundary>
+            <Calendar
+              current={currentMonth}
+              markedDates={markedDates}
+              onDayPress={(day) => setSelectedDate(day.dateString)}
+              onMonthChange={(month) => setCurrentMonth(month.dateString)}
+              enableSwipeMonths
+              firstDay={1}
+              hideExtraDays={false}
+              style={styles.calendar}
+              theme={calendarTheme}
+            />
+          </CalendarBoundary>
         </View>
 
         <View style={styles.dayHeader}>
@@ -329,6 +330,30 @@ export default function Schedule() {
       <ShiftSheet shift={selectedShift} sheetAnim={sheetAnim} onClose={closeShift} />
     </SafeAreaView>
   );
+}
+
+class CalendarBoundary extends Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.calendarFallback}>
+          <Ionicons name="calendar-clear-outline" size={42} color="#64748b" />
+          <Text style={styles.fallbackTitle}>Calendar unavailable</Text>
+          <Text style={styles.fallbackText}>
+            Pull to refresh or use the selected date details below.
+          </Text>
+        </View>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 function ShiftCard({ shift, onPress }) {
@@ -573,17 +598,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
 
-  markedDay: {
-    borderWidth: 1,
-    borderColor: "#3730a3",
-    backgroundColor: "#111827",
-  },
-
-  markedDayText: {
-    color: "#ffffff",
-    fontWeight: "900",
-  },
-
   dayHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -639,6 +653,28 @@ const styles = StyleSheet.create({
   },
 
   emptyText: {
+    color: "#94a3b8",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    marginTop: 6,
+  },
+
+  calendarFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 320,
+    padding: 24,
+  },
+
+  fallbackTitle: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 12,
+  },
+
+  fallbackText: {
     color: "#94a3b8",
     fontSize: 14,
     lineHeight: 20,

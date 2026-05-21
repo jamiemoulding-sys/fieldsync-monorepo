@@ -36,12 +36,26 @@ export default function TabLayout() {
       />
 
       <Tabs.Screen
-        name="history"
+        name="shifts"
         options={{
-          title: "History",
+          title: "Shifts",
           tabBarIcon: ({ color }) => (
             <Ionicons name="time" size={20} color={color} />
           ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="history"
+        options={{
+          href: null,
+        }}
+      />
+
+      <Tabs.Screen
+        name="clock-in"
+        options={{
+          href: null,
         }}
       />
 

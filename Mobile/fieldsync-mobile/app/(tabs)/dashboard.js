@@ -1,427 +1,631 @@
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import API from "../../services/api";
+import { getCurrentUser } from "../../utils/session";
 import { getTodayShift } from "../../utils/schedule";
 import { getShifts } from "../../utils/shifts";
+import { getActiveShift } from "../../utils/shiftsStorage";
 import { supabase } from "../../utils/supabase";
-import { startShift, endShift, getActiveShift } from "../../utils/shiftsStorage";
-import { startTracking, stopTracking } from "../../utils/locationTracking";
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ActivityIndicator,
-  Image,
-  ScrollView,
-  Animated,
-} from "react-native";
-import * as Haptics from "expo-haptics";
-import API from "../../services/api";
+
+const WEEK_START_DAY = 1;
+
+const coalesce = (...values) =>
+  values.find((value) => value !== undefined && value !== null && value !== "");
+
+const atStartOfDay = (date) => {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+
+const addDays = (date, days) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const getWeekStart = (date = new Date(), weekStartDay = WEEK_START_DAY) => {
+  const start = atStartOfDay(date);
+  const diff = (start.getDay() - weekStartDay + 7) % 7;
+  start.setDate(start.getDate() - diff);
+  return start;
+};
+
+const getShiftStart = (shift) => shift?.clock_in_time || shift?.start_time || shift?.date;
+const getShiftEnd = (shift) => shift?.clock_out_time || shift?.end_time || shift?.finish_time;
+
+const getLocationName = (shift) =>
+  shift?.location?.name ||
+  shift?.locations?.name ||
+  shift?.location_name ||
+  "Location TBC";
+
+const formatDate = (value) =>
+  new Date(value).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+
+const formatShortDate = (value) => {
+  if (!value) return "--";
+
+  return new Date(value).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+};
+
+const formatTime = (value) => {
+  if (!value) return "--:--";
+
+  return new Date(value).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const formatSeconds = (seconds) => {
+  const safeSeconds = Math.max(Number(seconds) || 0, 0);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.round((safeSeconds % 3600) / 60);
+
+  if (!hours && !minutes) return "0h";
+  if (!hours) return `${minutes}m`;
+  if (!minutes) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+};
+
+const getShiftSeconds = (shift) => {
+  const start = getShiftStart(shift);
+  const end = getShiftEnd(shift);
+  if (!start || !end) return 0;
+
+  const diff = new Date(end) - new Date(start);
+  if (Number.isNaN(diff) || diff <= 0) return 0;
+
+  return diff / 1000;
+};
+
+const getHolidayAllowance = (profile) =>
+  Number(
+    profile?.holiday_allowance ??
+      profile?.holiday_days ??
+      profile?.annual_leave ??
+      20
+  );
+
+const getUsedHolidayDays = (holidays, userId) => {
+  const approved = holidays.filter(
+    (holiday) => holiday.user_id === userId && holiday.status === "approved"
+  );
+
+  let total = 0;
+
+  approved.forEach((request) => {
+    const end = new Date(request.end_date);
+    const day = new Date(request.start_date);
+
+    while (day <= end) {
+      const dayOfWeek = day.getDay();
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) total++;
+      day.setDate(day.getDate() + 1);
+    }
+  });
+
+  return total;
+};
+
+async function loadScheduleWindow(user, start, end) {
+  const { data: schedules, error: scheduleError } = await supabase
+    .from("schedules")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("company_id", user.company_id)
+    .gte("start_time", start.toISOString())
+    .lt("start_time", end.toISOString())
+    .order("start_time", { ascending: true });
+
+  if (scheduleError) throw scheduleError;
+
+  const { data: locations, error: locationError } = await supabase
+    .from("locations")
+    .select("*")
+    .eq("company_id", user.company_id);
+
+  if (locationError) throw locationError;
+
+  return (schedules || []).map((shift) => ({
+    ...shift,
+    location:
+      (locations || []).find((location) => location.id === shift.location_id) ||
+      null,
+  }));
+}
+
+async function loadHolidaySummary(user) {
+  const allowance = getHolidayAllowance(user);
+
+  const { data, error } = await supabase
+    .from("holidays")
+    .select("*")
+    .eq("company_id", user.company_id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return {
+      allowance,
+      remaining: allowance,
+    };
+  }
+
+  const used = getUsedHolidayDays(data || [], user.id);
+
+  return {
+    allowance,
+    remaining: Math.max(allowance - used, 0),
+  };
+}
+
+async function loadLatestAnnouncement(user) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("announcements")
+    .select("*")
+    .eq("company_id", user.company_id)
+    .or(`expires_at.is.null,expires_at.gt.${now}`)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) return null;
+  return data?.[0] || null;
+}
+
+async function loadClockState() {
+  const localActiveShift = await getActiveShift();
+  let activeShift = localActiveShift || null;
+  let onBreak = !!localActiveShift?.break_started_at;
+
+  try {
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
+
+    if (token) {
+      const { data } = await API.get("/shifts/state", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      activeShift = data?.active_shift || null;
+      onBreak = !!data?.on_break;
+    }
+  } catch (err) {
+    console.log("Dashboard clock state sync failed:", err.message);
+  }
+
+  return {
+    activeShift,
+    onBreak,
+  };
+}
 
 export default function Dashboard() {
   const router = useRouter();
-  const params = useLocalSearchParams();
 
-  const [loading, setLoading] = useState(true);
-
+  const [profile, setProfile] = useState(null);
   const [todayShift, setTodayShift] = useState(null);
-  const [nextShift, setNextShift] = useState(null);
-  const [nextHoliday, setNextHoliday] = useState(null);
+  const [weekSchedule, setWeekSchedule] = useState([]);
+  const [weekShifts, setWeekShifts] = useState([]);
+  const [clockState, setClockState] = useState({ activeShift: null, onBreak: false });
+  const [holidaySummary, setHolidaySummary] = useState({ allowance: 0, remaining: 0 });
+  const [announcement, setAnnouncement] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
 
-  const [earnings, setEarnings] = useState(0);
-  const [streak, setStreak] = useState(0);
-  const [performance, setPerformance] = useState(100);
-
-  const [insight, setInsight] = useState("");
-
-  const [working, setWorking] = useState(false);
-  const [checkedIn, setCheckedIn] = useState(false);
-  const [onBreak, setOnBreak] = useState(false);
-  const [seconds, setSeconds] = useState(0);
-  const [currentShiftId, setCurrentShiftId] = useState(null);
-  const [actionInProgress, setActionInProgress] = useState(false);
-
-  const [locationId, setLocationId] = useState(null);
-
-  const scale = useRef(new Animated.Value(1)).current;
-
-  const load = useCallback(async () => {
-    if (loading) return;
-    console.log("Dashboard fetch started");
-    
-    setLoading(true);
-
+  const loadDashboard = useCallback(async ({ refreshing: isRefreshing = false } = {}) => {
     try {
-      const now = new Date();
-      const nowISO = now.toISOString();
-
-      const today = await getTodayShift();
-      const history = await getShifts();
-
-      setTodayShift(today);
-
-      // Load local cached state temporarily during loading
-      const localActiveShift = await getActiveShift();
-      if (localActiveShift) {
-        setCurrentShiftId(localActiveShift.id);
-        setLocationId(localActiveShift.location_id);
-        setWorking(true);
-        setCheckedIn(true);
-        setOnBreak(!!localActiveShift.break_started_at);
-        
-        if (localActiveShift.break_started_at) {
-          const breakStart = new Date(localActiveShift.break_started_at);
-          const elapsedSeconds = Math.floor((new Date() - breakStart) / 1000);
-          setSeconds(elapsedSeconds);
-        }
+      if (isRefreshing) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
       }
 
-      // Hydrate state from backend when online (replaces local state) - ONE TIME ONLY
-      try {
-        const token = (await supabase.auth.getSession()).data.session?.access_token;
-        if (token) {
-          const { data: state } = await API.get('/shifts/state', {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          
-          if (state?.active_shift) {
-            setCurrentShiftId(state.active_shift.id);
-            setLocationId(state.active_shift.location_id);
-            setWorking(true);
-            setCheckedIn(true);
-            setOnBreak(state.on_break || false);
-            
-            // Hydrate break timer from backend state
-            if (state.on_break && state.active_shift.break_started_at) {
-              const breakStart = new Date(state.active_shift.break_started_at);
-              const elapsedSeconds = Math.floor((new Date() - breakStart) / 1000);
-              setSeconds(elapsedSeconds);
-            }
-          } else {
-            // Backend says no active shift, clear local state
-            setCurrentShiftId(null);
-            setLocationId(null);
-            setWorking(false);
-            setCheckedIn(false);
-            setOnBreak(false);
-            setSeconds(0);
-          }
-        }
-      } catch (err) {
-        console.log('Backend state sync failed, using local state:', err.message);
-        // Don't retry - use local state and continue
-      }
+      setError("");
 
-      const userRes = await supabase.auth.getUser();
-      const user = userRes?.data?.user;
-
-      if (user) {
-        const { data: shifts } = await supabase
-          .from("schedules")
-          .select(`*, locations(name)`)
-          .eq("user_id", user.id)
-          .gte("start_time", nowISO)
-          .order("start_time", { ascending: true })
-          .limit(1);
-
-        setNextShift(shifts?.[0] || null);
-
-        const { data: holidays } = await supabase
-          .from("holiday_requests")
-          .select("*")
-          .eq("user_id", user.id)
-          .gte("start_date", nowISO.split("T")[0])
-          .order("start_date", { ascending: true })
-          .limit(1);
-
-        setNextHoliday(holidays?.[0] || null);
-      }
-
-      // HOURS
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
-
-      const weekShifts =
-        history?.filter(
-          (s) =>
-            s.clock_in_time &&
-            new Date(s.clock_in_time) > weekAgo
-        ) || [];
-
-      let hours = 0;
-      weekShifts.forEach((s) => {
-        if (!s.clock_out_time) return;
-
-        hours +=
-          (new Date(s.clock_out_time) -
-            new Date(s.clock_in_time)) /
-          3600000;
-      });
-
-      setEarnings(Math.round(hours * 10));
-
-      // STREAK
-      let currentStreak = 0;
-      let checkDate = new Date();
-
-      for (let i = 0; i < 30; i++) {
-        const dateStr = checkDate.toISOString().split("T")[0];
-
-        const worked = history.some(
-          (s) =>
-            s.clock_in_time &&
-            s.clock_in_time.startsWith(dateStr)
-        );
-
-        if (worked) {
-          currentStreak++;
-          checkDate.setDate(checkDate.getDate() - 1);
-        } else break;
-      }
-
-      setStreak(currentStreak);
-
-      // PERFORMANCE
-      let late = 0;
-      let missed = 0;
-
-      history.forEach((s) => {
-        if (s.is_late) late++;
-        if (!s.clock_in_time) missed++;
-      });
-
-      let score = 100 - late * 5 - missed * 10;
-      if (score < 0) score = 0;
-
-      setPerformance(score);
-
-      // AI INSIGHT
-      const shift = today || nextShift;
-
-      let message = "✅ You're performing well";
-
-      if (missed >= 2) message = "⚠️ Missed shifts detected";
-      else if (late >= 3) message = "⚠️ Lateness trend building";
-      else if (hours > 45) message = "⚠️ High workload this week";
-      else if (currentStreak >= 5)
-        message = "🔥 Strong work streak";
-
-      if (shift?.locations) {
-        const start = new Date(shift.start_time);
-        const travelMinutes = 30;
-
-        const leaveTime = new Date(
-          start.getTime() - travelMinutes * 60000
-        );
-
-        message += ` • Leave by ${leaveTime.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`;
-      }
-
-      setInsight(message);
-      
-      console.log("Dashboard fetch completed");
-    } catch (err) {
-      console.error("Dashboard fetch error:", err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []); // Empty dependency array - only run once on mount
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  function getCountdown(shift) {
-    if (!shift) return null;
-
-    const diff = new Date(shift.start_time) - new Date();
-
-    if (diff <= 0) return "Started";
-
-    const hrs = Math.floor(diff / 3600000);
-    const mins = Math.floor((diff % 3600000) / 60000);
-
-    return `Starts in ${hrs}h ${mins}m`;
-  }
-
-  useEffect(() => {
-    let interval;
-    if (working) {
-      interval = setInterval(() => {
-        setSeconds((s) => s + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [working]);
-
-  function formatTime() {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    return `${hrs}h ${mins}m`;
-  }
-
-  function pressIn() {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Animated.spring(scale, {
-      toValue: 0.96,
-      useNativeDriver: true,
-    }).start();
-  }
-
-  function pressOut() {
-    Animated.spring(scale, {
-      toValue: 1,
-      useNativeDriver: true,
-    }).start();
-  }
-
-  async function handleMainAction() {
-    if (loading || actionInProgress) return;
-
-    setActionInProgress(true);
-
-    if (!checkedIn) {
-      setActionInProgress(false);
-      return router.push("/(tabs)/clock-in");
-    }
-
-    if (!working) {
-      const shift = await startShift(locationId || null);
-      if (!shift) {
-        setActionInProgress(false);
+      const user = await getCurrentUser();
+      if (!user) {
+        setProfile(null);
+        setError("No active session. Please sign in again.");
         return;
       }
 
-      setCurrentShiftId(shift.id);
-      setWorking(true);
-      startTracking();
-      setActionInProgress(false);
-      return;
+      const weekStart = getWeekStart(new Date());
+      const weekEnd = addDays(weekStart, 7);
+
+      const [today, schedules, shifts, clock, holidays, latestAnnouncement] =
+        await Promise.all([
+          getTodayShift(),
+          loadScheduleWindow(user, weekStart, weekEnd),
+          getShifts({
+            from: weekStart.toISOString(),
+            limit: 80,
+            throwOnError: true,
+          }),
+          loadClockState(),
+          loadHolidaySummary(user),
+          loadLatestAnnouncement(user),
+        ]);
+
+      setProfile(user);
+      setTodayShift(today);
+      setWeekSchedule(schedules);
+      setWeekShifts(shifts || []);
+      setClockState(clock);
+      setHolidaySummary(holidays);
+      setAnnouncement(latestAnnouncement);
+    } catch (loadError) {
+      setError(loadError.message || "Dashboard could not be loaded.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
+  }, []);
 
-    await endShift(currentShiftId);
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
 
-    setWorking(false);
-    setCheckedIn(false);
-    setSeconds(0);
-    setCurrentShiftId(null);
+  const weekSummary = useMemo(() => {
+    const now = new Date();
+    const completed = weekShifts.filter((shift) => getShiftEnd(shift));
+    const completedSeconds = completed.reduce(
+      (sum, shift) => sum + getShiftSeconds(shift),
+      0
+    );
 
-    stopTracking();
-    setActionInProgress(false);
-  }
+    const upcoming = weekSchedule.filter((shift) => new Date(getShiftStart(shift)) >= now);
+    const upcomingSeconds = upcoming.reduce(
+      (sum, shift) => sum + getShiftSeconds(shift),
+      0
+    );
+
+    const nextShift = [...weekSchedule]
+      .filter((shift) => new Date(getShiftStart(shift)) >= now)
+      .sort((a, b) => new Date(getShiftStart(a)) - new Date(getShiftStart(b)))[0];
+
+    return {
+      completedHours: formatSeconds(completedSeconds),
+      upcomingHours: formatSeconds(upcomingSeconds),
+      completedCount: completed.length,
+      nextShift: nextShift || null,
+    };
+  }, [weekSchedule, weekShifts]);
+
+  const clockLabel = clockState.activeShift
+    ? clockState.onBreak
+      ? "On break"
+      : "Clocked in"
+    : "Not clocked in";
+
+  const firstName = coalesce(profile?.name, profile?.full_name, "there")
+    .split(" ")[0];
+  const companyLine = [profile?.role, profile?.company_name].filter(Boolean).join(" at ");
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#6366f1" />
-      </View>
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.loadingWrap}>
+          <View style={styles.loadingIcon}>
+            <ActivityIndicator color="#ffffff" size="large" />
+          </View>
+          <Text style={styles.loadingTitle}>Loading home</Text>
+          <Text style={styles.loadingText}>Pulling together your day...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
-  const shift = todayShift || nextShift;
+  return (
+    <SafeAreaView style={styles.screen}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadDashboard({ refreshing: true })}
+            tintColor="#6366f1"
+            colors={["#6366f1"]}
+          />
+        }
+      >
+        <View style={styles.headerCard}>
+          <Text style={styles.greeting}>Hello, {firstName}</Text>
+          <Text style={styles.todayText}>{formatDate(new Date())}</Text>
+          {companyLine ? (
+            <View style={styles.rolePill}>
+              <Ionicons name="business-outline" size={14} color="#a5b4fc" />
+              <Text style={styles.roleText} numberOfLines={1}>
+                {companyLine}
+              </Text>
+            </View>
+          ) : null}
+        </View>
 
-    return (
-    <View style={styles.screen}>
-      {/* HEADER */}
-      <View style={styles.fixedHeader}>
-        <Image
-          source={require("../../assets/images/logo.png")}
-          style={styles.logoLeft}
+        {error ? (
+          <View style={styles.errorCard}>
+            <View style={styles.errorIcon}>
+              <Ionicons name="alert-circle-outline" size={28} color="#fecaca" />
+            </View>
+            <View style={styles.errorBody}>
+              <Text style={styles.errorTitle}>Home unavailable</Text>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => loadDashboard()}>
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
+        <TodayCard
+          clockLabel={clockLabel}
+          onClockIn={() => router.push("/(tabs)/clock-in")}
+          shift={todayShift}
         />
-        <Image
-          source={require("../../assets/images/Zorvia.png")}
-          style={styles.logoRight}
-        />
+
+        <WeekSummary summary={weekSummary} />
+
+        <HolidaySummary summary={holidaySummary} />
+
+        <QuickActions router={router} />
+
+        <Announcements announcement={announcement} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function TodayCard({ clockLabel, onClockIn, shift }) {
+  const start = getShiftStart(shift);
+  const end = getShiftEnd(shift);
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionIcon}>
+          <Ionicons name="calendar-outline" size={20} color="#a5b4fc" />
+        </View>
+        <Text style={styles.sectionTitle}>Today</Text>
       </View>
 
-      {/* SCROLL */}
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={{ height: 90 }} />
-
-        <Animated.View style={{ transform: [{ scale }] }}>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={handleMainAction}
-            onPressIn={pressIn}
-            onPressOut={pressOut}
-            disabled={actionInProgress}
-          >
-            <Text style={styles.action}>
-              {!checkedIn ? "Check In" : working ? "Clock Out" : "Start Shift"}
-            </Text>
-
-            {working && <Text style={styles.timer}>{formatTime()}</Text>}
-          </TouchableOpacity>
-        </Animated.View>
-
-        <View style={styles.performanceRow}>
-          <View style={styles.performanceCard}>
-            <Text style={styles.value}>£{earnings}</Text>
-            <Text style={styles.label}>Earnings</Text>
+      {shift ? (
+        <>
+          <Text style={styles.shiftTitle} numberOfLines={2}>
+            {shift.job_name || shift.title || "Scheduled Shift"}
+          </Text>
+          <InfoRow icon="location-outline" label="Location" value={getLocationName(shift)} />
+          <View style={styles.metricGrid}>
+            <MetricCard label="Start" value={formatTime(start)} icon="play-outline" />
+            <MetricCard label="End" value={formatTime(end)} icon="stop-outline" />
+            <MetricCard
+              label="Total"
+              value={formatSeconds(getShiftSeconds(shift))}
+              icon="hourglass-outline"
+              accent
+            />
           </View>
+        </>
+      ) : (
+        <EmptyInline
+          icon="calendar-clear-outline"
+          title="No scheduled shift today"
+          text="Your next shift will still appear in the weekly summary."
+        />
+      )}
 
-          <View style={styles.performanceCard}>
-            <Text style={styles.value}>🔥 {streak}</Text>
-            <Text style={styles.label}>Streak</Text>
-          </View>
+      <View style={styles.statusRow}>
+        <View
+          style={[
+            styles.statusDot,
+            { backgroundColor: clockLabel === "Clocked in" ? "#22c55e" : "#f59e0b" },
+          ]}
+        />
+        <Text style={styles.statusText}>{clockLabel}</Text>
+      </View>
 
-          <View style={styles.performanceCard}>
-            <Text style={styles.value}>{performance}%</Text>
-            <Text style={styles.label}>Score</Text>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.label}>AI Insight</Text>
-          <Text style={styles.value}>{insight}</Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.label}>Next Shift</Text>
-
-          {shift ? (
-            <>
-              <Text style={styles.title}>{shift.job_name}</Text>
-
-              <Text style={styles.meta}>
-                📍 {shift.locations?.name || "No location"}
-              </Text>
-
-              <Text style={styles.meta}>
-                {new Date(shift.start_time).toLocaleString()}
-              </Text>
-
-              <Text style={styles.countdown}>
-                {getCountdown(shift)}
-              </Text>
-            </>
-          ) : (
-            <Text style={styles.meta}>No upcoming shift</Text>
-          )}
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.label}>Next Holiday</Text>
-
-          {nextHoliday ? (
-            <Text style={styles.title}>
-              {nextHoliday.start_date} → {nextHoliday.end_date}
-            </Text>
-          ) : (
-            <Text style={styles.meta}>None booked</Text>
-          )}
-        </View>
-      </ScrollView>
+      <TouchableOpacity style={styles.primaryButton} onPress={onClockIn}>
+        <Ionicons name="log-in-outline" size={20} color="#ffffff" />
+        <Text style={styles.primaryButtonText}>Clock In</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
-/* =========================
-   STYLES
-========================= */
+function WeekSummary({ summary }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionIcon}>
+          <Ionicons name="stats-chart-outline" size={20} color="#a5b4fc" />
+        </View>
+        <Text style={styles.sectionTitle}>This Week</Text>
+      </View>
+
+      <View style={styles.metricGrid}>
+        <MetricCard label="Done" value={summary.completedHours} icon="checkmark-outline" />
+        <MetricCard label="Upcoming" value={summary.upcomingHours} icon="time-outline" />
+        <MetricCard
+          label="Shifts"
+          value={String(summary.completedCount)}
+          icon="briefcase-outline"
+          accent
+        />
+      </View>
+
+      <View style={styles.nextShiftBox}>
+        <Text style={styles.nextShiftLabel}>Next shift</Text>
+        {summary.nextShift ? (
+          <>
+            <Text style={styles.nextShiftTitle} numberOfLines={1}>
+              {getLocationName(summary.nextShift)}
+            </Text>
+            <Text style={styles.nextShiftMeta}>
+              {formatShortDate(getShiftStart(summary.nextShift))} ·{" "}
+              {formatTime(getShiftStart(summary.nextShift))} -{" "}
+              {formatTime(getShiftEnd(summary.nextShift))}
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.nextShiftMeta}>No more shifts scheduled this week</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function HolidaySummary({ summary }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionIcon}>
+          <Ionicons name="airplane-outline" size={20} color="#a5b4fc" />
+        </View>
+        <Text style={styles.sectionTitle}>Holiday</Text>
+      </View>
+
+      <View style={styles.metricGrid}>
+        <MetricCard
+          label="Allowance"
+          value={`${summary.allowance} days`}
+          icon="calendar-number-outline"
+        />
+        <MetricCard
+          label="Remaining"
+          value={`${summary.remaining} days`}
+          icon="sparkles-outline"
+          accent
+        />
+      </View>
+    </View>
+  );
+}
+
+function QuickActions({ router }) {
+  const actions = [
+    { icon: "log-in-outline", label: "Clock In", route: "/(tabs)/clock-in" },
+    { icon: "calendar-outline", label: "Schedule", route: "/(tabs)/schedule" },
+    { icon: "time-outline", label: "Shifts", route: "/(tabs)/shifts" },
+    { icon: "document-text-outline", label: "Payslips", route: "/(tabs)/payslips" },
+  ];
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionIcon}>
+          <Ionicons name="apps-outline" size={20} color="#a5b4fc" />
+        </View>
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+      </View>
+
+      <View style={styles.actionsGrid}>
+        {actions.map((action) => (
+          <TouchableOpacity
+            key={action.label}
+            style={styles.actionButton}
+            onPress={() => router.push(action.route)}
+            activeOpacity={0.78}
+          >
+            <View style={styles.actionIcon}>
+              <Ionicons name={action.icon} size={20} color="#c7d2fe" />
+            </View>
+            <Text style={styles.actionText}>{action.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function Announcements({ announcement }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionIcon}>
+          <Ionicons name="megaphone-outline" size={20} color="#a5b4fc" />
+        </View>
+        <Text style={styles.sectionTitle}>Announcements</Text>
+      </View>
+
+      {announcement ? (
+        <View style={styles.announcementBox}>
+          <Text style={styles.announcementTitle} numberOfLines={2}>
+            {announcement.title}
+          </Text>
+          <Text style={styles.announcementText} numberOfLines={4}>
+            {announcement.message}
+          </Text>
+        </View>
+      ) : (
+        <EmptyInline
+          icon="chatbox-ellipses-outline"
+          title="No announcements"
+          text="Company updates will appear here when posted."
+        />
+      )}
+    </View>
+  );
+}
+
+function InfoRow({ icon, label, value }) {
+  return (
+    <View style={styles.infoRow}>
+      <View style={styles.infoIcon}>
+        <Ionicons name={icon} size={18} color="#94a3b8" />
+      </View>
+      <View style={styles.infoBody}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={styles.infoValue} numberOfLines={2}>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function MetricCard({ label, value, icon, accent = false }) {
+  return (
+    <View style={[styles.metricCard, accent && styles.metricCardAccent]}>
+      <View style={styles.metricIcon}>
+        <Ionicons name={icon} size={16} color={accent ? "#c7d2fe" : "#94a3b8"} />
+      </View>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text style={[styles.metricValue, accent && styles.metricValueAccent]} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function EmptyInline({ icon, title, text }) {
+  return (
+    <View style={styles.emptyInline}>
+      <Ionicons name={icon} size={34} color="#64748b" />
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptyText}>{text}</Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   screen: {
@@ -429,114 +633,423 @@ const styles = StyleSheet.create({
     backgroundColor: "#020617",
   },
 
-  container: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-
-  fixedHeader: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 90,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    zIndex: 100,
+  scroll: {
+    flex: 1,
     backgroundColor: "#020617",
   },
 
-  logoLeft: {
-    width: 200,
-    height: 60,
-    resizeMode: "contain",
+  content: {
+    flexGrow: 1,
+    backgroundColor: "#020617",
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 36,
   },
 
-  logoRight: {
-    width: 120,
-    height: 40,
-    resizeMode: "contain",
-    opacity: 0.9,
+  loadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "#020617",
   },
 
-  button: {
-    backgroundColor: "#0f172a",
-    padding: 28,
+  loadingIcon: {
+    width: 76,
+    height: 76,
     borderRadius: 24,
     alignItems: "center",
-    marginBottom: 30,
-    borderWidth: 1,
-    borderColor: "#6366f1",
+    justifyContent: "center",
+    backgroundColor: "#6366f1",
+    marginBottom: 20,
   },
 
-  action: {
-    color: "#fff",
-    fontSize: 30,
-    fontWeight: "800",
+  loadingTitle: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "900",
   },
 
-  timer: {
-    color: "#6366f1",
+  loadingText: {
+    color: "#94a3b8",
+    fontSize: 14,
     marginTop: 8,
+    textAlign: "center",
   },
 
-  performanceRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 30,
-  },
-
-  performanceCard: {
+  headerCard: {
     backgroundColor: "#0f172a",
-    padding: 18,
-    borderRadius: 16,
-    width: "31%",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "#1e293b",
+    padding: 20,
+    marginBottom: 16,
+  },
+
+  greeting: {
+    color: "#ffffff",
+    fontSize: 30,
+    fontWeight: "900",
+  },
+
+  todayText: {
+    color: "#94a3b8",
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 5,
+  },
+
+  rolePill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: "#1e1b4b",
+    borderWidth: 1,
+    borderColor: "#3730a3",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginTop: 14,
+    maxWidth: "100%",
+  },
+
+  roleText: {
+    color: "#c7d2fe",
+    fontSize: 13,
+    fontWeight: "800",
+    marginLeft: 6,
+    textTransform: "capitalize",
+  },
+
+  errorCard: {
+    flexDirection: "row",
+    backgroundColor: "#3f1018",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#7f1d1d",
+    padding: 16,
+    marginBottom: 16,
+  },
+
+  errorIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#7f1d1d",
+    marginRight: 12,
+  },
+
+  errorBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  errorTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  errorText: {
+    color: "#fecaca",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+
+  retryButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "#dc2626",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 12,
+  },
+
+  retryText: {
+    color: "#ffffff",
+    fontWeight: "800",
   },
 
   card: {
     backgroundColor: "#0f172a",
-    padding: 20,
-    borderRadius: 18,
-    marginBottom: 22,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "#1e293b",
+    padding: 16,
+    marginBottom: 16,
   },
 
-  value: {
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+
+  sectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#273449",
+    marginRight: 11,
+  },
+
+  sectionTitle: {
     color: "#ffffff",
     fontSize: 18,
+    fontWeight: "900",
+  },
+
+  shiftTitle: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "900",
+    lineHeight: 25,
+    marginBottom: 12,
+  },
+
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    padding: 13,
+    marginBottom: 12,
+  },
+
+  infoIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#020617",
+    marginRight: 12,
+  },
+
+  infoBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  infoLabel: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+
+  infoValue: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+
+  metricGrid: {
+    flexDirection: "row",
+    gap: 9,
+  },
+
+  metricCard: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    padding: 11,
+  },
+
+  metricCardAccent: {
+    borderColor: "#3730a3",
+    backgroundColor: "#15173a",
+  },
+
+  metricIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#020617",
+    marginBottom: 8,
+  },
+
+  metricLabel: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+
+  metricValue: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+
+  metricValueAccent: {
+    color: "#c7d2fe",
+  },
+
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginTop: 12,
+  },
+
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 10,
+  },
+
+  statusText: {
+    color: "#cbd5e1",
+    fontSize: 14,
     fontWeight: "800",
   },
 
-  title: {
+  primaryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#6366f1",
+    borderRadius: 16,
+    paddingVertical: 15,
+    marginTop: 12,
+  },
+
+  primaryButtonText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "900",
+    marginLeft: 8,
+  },
+
+  nextShiftBox: {
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    padding: 13,
+    marginTop: 12,
+  },
+
+  nextShiftLabel: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+
+  nextShiftTitle: {
     color: "#ffffff",
     fontSize: 16,
-    fontWeight: "700",
-    marginTop: 6,
+    fontWeight: "900",
+    marginTop: 4,
   },
 
-  label: {
-    color: "#94a3b8",
-    fontSize: 12,
-  },
-
-  meta: {
+  nextShiftMeta: {
     color: "#cbd5e1",
-    marginTop: 6,
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 4,
   },
 
-  countdown: {
-    color: "#6366f1",
-    marginTop: 8,
-    fontWeight: "600",
+  actionsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
   },
 
-  center: {
-    flex: 1,
-    justifyContent: "center",
+  actionButton: {
+    width: "48%",
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    padding: 13,
+  },
+
+  actionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     alignItems: "center",
-    backgroundColor: "#020617",
+    justifyContent: "center",
+    backgroundColor: "#1e1b4b",
+    borderWidth: 1,
+    borderColor: "#3730a3",
+    marginBottom: 10,
+  },
+
+  actionText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  announcementBox: {
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    padding: 14,
+  },
+
+  announcementTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  announcementText: {
+    color: "#cbd5e1",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 7,
+  },
+
+  emptyInline: {
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    padding: 18,
+  },
+
+  emptyTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "900",
+    marginTop: 10,
+    textAlign: "center",
+  },
+
+  emptyText: {
+    color: "#94a3b8",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 5,
+    textAlign: "center",
   },
 });

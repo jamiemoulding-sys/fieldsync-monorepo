@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -45,48 +44,85 @@ const formatDays = (value) => {
   return `${amount} days`;
 };
 
-const getApprovedDays = (rows = []) =>
-  rows.reduce((sum, row) => {
-    if (row.days !== undefined && row.days !== null) {
-      return sum + Number(row.days || 0);
+const toDateInput = (date) => {
+  if (!date) return "";
+  return new Date(date).toISOString().slice(0, 10);
+};
+
+const getHolidayAllowance = (profile) =>
+  Number(
+    profile?.holiday_allowance ??
+      profile?.holiday_days ??
+      profile?.annual_leave ??
+      20
+  );
+
+const getUsedHolidayDays = (requests, userId) => {
+  const approved = requests.filter(
+    (holiday) => holiday.user_id === userId && holiday.status === "approved"
+  );
+
+  let total = 0;
+
+  approved.forEach((request) => {
+    const end = new Date(request.end_date);
+    const day = new Date(request.start_date);
+
+    while (day <= end) {
+      const dayOfWeek = day.getDay();
+
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        total++;
+      }
+
+      day.setDate(day.getDate() + 1);
     }
+  });
 
-    if (row.start_date && row.end_date) {
-      const start = new Date(row.start_date);
-      const end = new Date(row.end_date);
-      const diff = Math.floor((end - start) / 86400000) + 1;
-      return sum + Math.max(diff, 0);
-    }
+  return total;
+};
 
-    return sum;
-  }, 0);
+async function loadHolidaySummary(profile) {
+  const allowance = getHolidayAllowance(profile);
 
-async function loadHolidayRemaining(userId, allowance) {
-  if (!userId || allowance === undefined) return undefined;
+  if (!profile?.id || !profile?.company_id) {
+    return {
+      allowance,
+      remaining: allowance,
+    };
+  }
 
-  const request = (table) =>
-    supabase
-      .from(table)
-      .select("days,status,start_date,end_date")
-      .eq("user_id", userId)
-      .eq("status", "approved");
+  const { data, error } = await supabase
+    .from("holidays")
+    .select("*")
+    .eq("company_id", profile.company_id)
+    .order("created_at", { ascending: false });
 
-  const primary = await request("holidays");
-  const result = primary.error ? await request("holiday_requests") : primary;
+  if (error) {
+    return {
+      allowance,
+      remaining: allowance,
+    };
+  }
 
-  if (result.error) return undefined;
+  const holidays = (data || []).map((holiday) => ({
+    ...holiday,
+    start_date: toDateInput(holiday.start_date),
+    end_date: toDateInput(holiday.end_date),
+  }));
 
-  return Math.max(Number(allowance || 0) - getApprovedDays(result.data), 0);
+  const used = getUsedHolidayDays(holidays, profile.id);
+
+  return {
+    allowance,
+    remaining: allowance - used,
+  };
 }
 
-function normalizeProfile(authUser, row, calculatedHolidayRemaining) {
+function normalizeProfile(authUser, row, holidaySummary) {
   const metadata = authUser?.user_metadata || {};
   const appMetadata = authUser?.app_metadata || {};
-  const holidayAllowance = coalesce(
-    row?.holiday_allowance,
-    metadata.holiday_allowance,
-    appMetadata.holiday_allowance
-  );
+  const holidayAllowance = holidaySummary?.allowance ?? getHolidayAllowance(row);
 
   return {
     id: coalesce(row?.id, authUser?.id),
@@ -100,13 +136,7 @@ function normalizeProfile(authUser, row, calculatedHolidayRemaining) {
     hourly_rate: coalesce(row?.hourly_rate, metadata.hourly_rate),
     overtime_rate: coalesce(row?.overtime_rate, metadata.overtime_rate),
     holiday_allowance: holidayAllowance,
-    holiday_remaining: coalesce(
-      row?.holiday_remaining,
-      row?.remaining_holiday,
-      row?.holiday_balance,
-      metadata.holiday_remaining,
-      calculatedHolidayRemaining
-    ),
+    holiday_remaining: holidaySummary?.remaining ?? holidayAllowance,
     created_at: coalesce(row?.created_at, authUser?.created_at),
   };
 }
@@ -117,21 +147,6 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [clearingCache, setClearingCache] = useState(false);
-
-  const clearAuthCache = useCallback(async () => {
-    try {
-      setClearingCache(true);
-      await removeToken();
-      await supabase.auth.signOut({ scope: "local" });
-      setUser(null);
-      setError("Auth cache cleared. Please sign in again.");
-      Alert.alert("Auth cache cleared", "Please sign in again.");
-      router.replace("/login");
-    } finally {
-      setClearingCache(false);
-    }
-  }, [router]);
 
   const loadUser = useCallback(async () => {
     try {
@@ -157,16 +172,9 @@ export default function Profile() {
       ]);
 
       const authUser = authResponse.data?.user || authResponse.data;
-      const holidayAllowance = coalesce(
-        profileRow?.holiday_allowance,
-        authUser?.user_metadata?.holiday_allowance
-      );
-      const holidayRemaining = await loadHolidayRemaining(
-        profileRow?.id || authUser?.id,
-        holidayAllowance
-      );
+      const holidaySummary = await loadHolidaySummary(profileRow);
 
-      setUser(normalizeProfile(authUser, profileRow, holidayRemaining));
+      setUser(normalizeProfile(authUser, profileRow, holidaySummary));
     } catch (loadError) {
       if (loadError.response?.status === 401) {
         setError("Your session expired. Please sign in again.");
@@ -278,15 +286,6 @@ export default function Profile() {
                 <TouchableOpacity style={styles.retryButton} onPress={loadUser}>
                   <Text style={styles.retryText}>Retry</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.errorClearButton}
-                  onPress={clearAuthCache}
-                  disabled={clearingCache}
-                >
-                  <Text style={styles.errorClearText}>
-                    {clearingCache ? "Clearing..." : "Clear cache"}
-                  </Text>
-                </TouchableOpacity>
               </View>
             </View>
           </View>
@@ -344,14 +343,6 @@ export default function Profile() {
             icon="lock-closed-outline"
             title="Change Password"
             subtitle="Manage your sign-in credentials"
-          />
-          <ActionRow
-            icon="trash-outline"
-            title={clearingCache ? "Clearing Auth Cache..." : "Clear Auth Cache"}
-            subtitle="Remove stale local session data"
-            iconColor="#f87171"
-            onPress={clearAuthCache}
-            disabled={clearingCache}
           />
           <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={20} color="#ffffff" />
@@ -844,17 +835,4 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 
-  errorClearButton: {
-    backgroundColor: "#111827",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "#374151",
-  },
-
-  errorClearText: {
-    color: "#ffffff",
-    fontWeight: "800",
-  },
 });

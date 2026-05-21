@@ -2,6 +2,8 @@
 require("dotenv").config();
 require("cross-fetch/polyfill");
 
+console.log("CORRECT BACKEND INDEX LOADED");
+
 
 const express = require("express");
 const cors = require("cors");

@@ -1,23 +1,8 @@
 const { createClient } = require("@supabase/supabase-js");
-const { query } = require("../database/connection");
-/* ===================================
-SUPABASE ADMIN CLIENT
-=================================== */
-
-const ws = require("ws");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-    realtime: {
-      transport: ws,
-    },
-  }
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 /* ===================================
@@ -30,7 +15,8 @@ const authenticateToken = async (
   res,
   next
 ) => {
-  console.log("AUTH MIDDLEWARE START");
+  console.log("=== AUTH MIDDLEWARE START ===");
+  console.log("AUTH HEADER:", req.headers.authorization);
   
   try {
     const authHeader =
@@ -42,6 +28,7 @@ const authenticateToken = async (
         "Bearer "
       )
     ) {
+      console.log("ERROR: No token provided");
       return res.status(401).json({
         error: "No token provided",
       });
@@ -50,21 +37,21 @@ const authenticateToken = async (
     const token =
       authHeader.split(" ")[1];
 
-    console.log("TOKEN RECEIVED");
-
-    console.log("TOKEN RECEIVED");
+    console.log("TOKEN:", token ? token.substring(0, 20) + "..." : "null");
 
     if (
       !token ||
       token === "undefined" ||
       token === "null"
     ) {
+      console.log("ERROR: Invalid token");
       return res.status(401).json({
         error: "Invalid token",
       });
     }
 
     /* VERIFY SUPABASE TOKEN */
+    console.log("CALLING SUPABASE AUTH.GETUSER");
     const {
       data,
       error,
@@ -73,102 +60,22 @@ const authenticateToken = async (
         token
       );
 
+    console.log("SUPABASE DATA:", JSON.stringify(data, null, 2));
+    console.log("SUPABASE ERROR:", error ? JSON.stringify(error, null, 2) : "null");
+
     if (
       error ||
       !data?.user
     ) {
+      console.log("ERROR: Supabase auth failed -", error?.message || "No user data");
       return res.status(401).json({
-        error:
-          "Unauthorized",
+        error: "Unauthorized",
+        details: error?.message
       });
     }
 
-    const authUser =
-      data.user;
-
-    console.log("SUPABASE USER:", authUser?.id);
-
-    /* GET LIVE USER FROM DB */
-    const result =
-      await query(
-        `
-        SELECT
-          id,
-          email,
-          name,
-          role,
-          company_id,
-          is_pro,
-          temp_role,
-          temp_role_expires
-        FROM users
-        WHERE id = $1
-        LIMIT 1
-        `,
-        [authUser.id]
-      );
-
-    const user =
-      result.rows[0];
-
-    if (!user) {
-      return res.status(401).json({
-        error: "User not found",
-      });
-    }
-
-    let finalRole =
-      user.role ||
-      "employee";
-
-    /* TEMP ROLE SUPPORT */
-    if (
-      user.temp_role &&
-      user.temp_role_expires
-    ) {
-      const now =
-        new Date();
-
-      const expiry =
-        new Date(
-          user.temp_role_expires
-        );
-
-      if (expiry > now) {
-        finalRole =
-          user.temp_role;
-      } else {
-        await query(
-          `
-          UPDATE users
-          SET temp_role = NULL,
-              temp_role_expires = NULL
-          WHERE id = $1
-          `,
-          [user.id]
-        );
-      }
-    }
-
-    /* USER PAYLOAD */
-    req.user = {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: finalRole,
-
-      companyId:
-        user.company_id,
-
-      company_id:
-        user.company_id,
-
-      isPro:
-        user.is_pro || false,
-    };
-
-    console.log("AUTH MIDDLEWARE SUCCESS");
-    console.log("CALLING NEXT()");
+    req.user = data.user;
+    console.log("AUTH MIDDLEWARE SUCCESS - USER ID:", req.user.id);
     next();
   } catch (err) {
     console.error(

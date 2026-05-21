@@ -262,10 +262,7 @@ export default function Schedule() {
         }
       >
         <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>Schedule</Text>
-            <Text style={styles.title}>Your month</Text>
-          </View>
+          <Text style={styles.title}>Schedule</Text>
           <TouchableOpacity style={styles.refreshButton} onPress={() => loadSchedule()}>
             <Ionicons name="refresh-outline" size={22} color="#c7d2fe" />
           </TouchableOpacity>
@@ -409,27 +406,49 @@ function ShiftSheet({ shift, sheetAnim, onClose }) {
       <View style={styles.modalOverlay}>
         <TouchableOpacity style={styles.modalBackdrop} onPress={onClose} />
         <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
-          <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             <View style={styles.sheetTitleWrap}>
-              <Text style={styles.sheetEyebrow}>Shift details</Text>
               <Text style={styles.sheetTitle}>{getShiftTitle(shift)}</Text>
+              <View style={styles.sheetLocationRow}>
+                <Ionicons name="location-outline" size={17} color="#a5b4fc" />
+                <Text style={styles.sheetLocationText} numberOfLines={1}>
+                  {getLocationName(shift)}
+                </Text>
+              </View>
             </View>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Ionicons name="close" size={28} color="#ffffff" />
+              <Ionicons name="close" size={24} color="#ffffff" />
             </TouchableOpacity>
           </View>
 
-          <DetailRow icon="location-outline" label="Location" value={getLocationName(shift)} />
+          <View style={styles.sheetSummary}>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>Time</Text>
+              <Text style={styles.summaryValue}>
+                {formatTime(getShiftStart(shift))} - {formatTime(getShiftEnd(shift))}
+              </Text>
+            </View>
+            <View style={styles.summaryDivider} />
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryLabel}>Paid</Text>
+              <Text style={styles.summaryValue}>{formatHours(getPaidHours(shift))}</Text>
+            </View>
+          </View>
+
           <DetailRow icon="calendar-outline" label="Date" value={formatDate(getShiftStart(shift))} />
           <DetailRow
-            icon="time-outline"
-            label="Time"
-            value={`${formatTime(getShiftStart(shift))} - ${formatTime(getShiftEnd(shift))}`}
+            icon="location-outline"
+            label="Location"
+            value={getLocationName(shift)}
+            highlight
           />
-          <DetailRow icon="hourglass-outline" label="Total hours" value={formatHours(getShiftHours(shift))} />
+          <DetailRow
+            icon="hourglass-outline"
+            label="Total hours"
+            value={formatHours(getShiftHours(shift))}
+            highlight
+          />
           <DetailRow icon="pause-circle-outline" label="Break duration" value={`${breakMinutes}m`} />
-          <DetailRow icon="cash-outline" label="Total paid hours" value={formatHours(getPaidHours(shift))} />
           <DetailRow icon="document-text-outline" label="Notes" value={getShiftNotes(shift)} multiline />
         </Animated.View>
       </View>
@@ -437,15 +456,15 @@ function ShiftSheet({ shift, sheetAnim, onClose }) {
   );
 }
 
-function DetailRow({ icon, label, value, multiline = false }) {
+function DetailRow({ icon, label, value, multiline = false, highlight = false }) {
   return (
-    <View style={[styles.detailRow, multiline && styles.detailRowTop]}>
-      <View style={styles.detailIcon}>
+    <View style={[styles.detailRow, multiline && styles.detailRowTop, highlight && styles.detailRowHighlight]}>
+      <View style={[styles.detailIcon, highlight && styles.detailIconHighlight]}>
         <Ionicons name={icon} size={18} color="#a5b4fc" />
       </View>
       <View style={styles.detailBody}>
         <Text style={styles.detailLabel}>{label}</Text>
-        <Text style={styles.detailValue}>{value}</Text>
+        <Text style={[styles.detailValue, highlight && styles.detailValueHighlight]}>{value}</Text>
       </View>
     </View>
   );
@@ -465,8 +484,8 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     backgroundColor: "#020617",
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingHorizontal: 18,
+    paddingTop: 8,
     paddingBottom: 36,
   },
 
@@ -505,27 +524,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 18,
-  },
-
-  eyebrow: {
-    color: "#94a3b8",
-    fontSize: 13,
-    fontWeight: "800",
-    textTransform: "uppercase",
+    marginBottom: 10,
   },
 
   title: {
     color: "#ffffff",
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: "900",
-    marginTop: 4,
   },
 
   refreshButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 15,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#0f172a",
@@ -586,11 +597,11 @@ const styles = StyleSheet.create({
 
   calendarCard: {
     backgroundColor: "#0f172a",
-    borderRadius: 22,
-    padding: 8,
+    borderRadius: 20,
+    padding: 6,
     borderWidth: 1,
     borderColor: "#1e293b",
-    marginBottom: 18,
+    marginBottom: 14,
     overflow: "hidden",
   },
 
@@ -602,7 +613,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
   dayLabel: {
@@ -614,7 +625,7 @@ const styles = StyleSheet.create({
 
   dayTitle: {
     color: "#ffffff",
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: "900",
     marginTop: 3,
   },
@@ -774,25 +785,16 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     borderWidth: 1,
     borderColor: "#1e293b",
-    paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingHorizontal: 18,
+    paddingTop: 18,
     paddingBottom: 34,
-  },
-
-  sheetHandle: {
-    alignSelf: "center",
-    width: 48,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: "#334155",
-    marginBottom: 16,
   },
 
   sheetHeader: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 14,
   },
 
   sheetTitleWrap: {
@@ -800,27 +802,68 @@ const styles = StyleSheet.create({
     paddingRight: 14,
   },
 
-  sheetEyebrow: {
+  sheetTitle: {
+    color: "#ffffff",
+    fontSize: 25,
+    fontWeight: "900",
+    lineHeight: 30,
+  },
+
+  sheetLocationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 7,
+  },
+
+  sheetLocationText: {
+    color: "#c7d2fe",
+    fontSize: 14,
+    fontWeight: "800",
+    marginLeft: 6,
+    flex: 1,
+  },
+
+  closeButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#dc2626",
+  },
+
+  sheetSummary: {
+    flexDirection: "row",
+    backgroundColor: "#111827",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#273449",
+    padding: 16,
+    marginBottom: 12,
+  },
+
+  summaryItem: {
+    flex: 1,
+  },
+
+  summaryDivider: {
+    width: 1,
+    backgroundColor: "#273449",
+    marginHorizontal: 14,
+  },
+
+  summaryLabel: {
     color: "#94a3b8",
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
   },
 
-  sheetTitle: {
+  summaryValue: {
     color: "#ffffff",
-    fontSize: 24,
+    fontSize: 17,
     fontWeight: "900",
-    marginTop: 4,
-  },
-
-  closeButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#dc2626",
+    marginTop: 5,
   },
 
   detailRow: {
@@ -830,8 +873,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "#1f2937",
-    padding: 14,
-    marginBottom: 10,
+    padding: 13,
+    marginBottom: 9,
+  },
+
+  detailRowHighlight: {
+    borderColor: "#3730a3",
+    backgroundColor: "#15173a",
   },
 
   detailRowTop: {
@@ -846,6 +894,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#020617",
     marginRight: 12,
+  },
+
+  detailIconHighlight: {
+    backgroundColor: "#1e1b4b",
   },
 
   detailBody: {
@@ -865,5 +917,10 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 21,
     marginTop: 3,
+  },
+
+  detailValueHighlight: {
+    color: "#c7d2fe",
+    fontSize: 16,
   },
 });

@@ -1,4 +1,5 @@
 console.log("🔥 AUTH ROUTES LOADED");
+console.log("CORRECT AUTH ROUTES FILE LOADED");
 
 const express = require("express");
 const router = express.Router();
@@ -439,6 +440,13 @@ router.post("/set-password", async (req, res) => {
   }
 });
 
+/* =====================================
+   TEST ROUTE
+===================================== */
+router.get("/test", (req, res) => {
+  res.json({ ok: true });
+});
+
 
 
 /* =====================================
@@ -448,70 +456,12 @@ router.get(
   "/me",
   authenticateToken,
   async (req, res) => {
-    console.log("AUTH ME START");
-    console.log("AUTH USER:", req.user);
-    
-    try {
-      console.log("BEFORE DB QUERY");
-      const startTime = Date.now();
-      
-      const result =
-        await query(
-          `
-          SELECT
-            u.id,
-            u.email,
-            u.name,
-            u.phone,
-            u.role,
-            u.company_id,
-            u.job_title,
-            u.created_at,
-            u.hourly_rate,
-            u.overtime_rate,
-            u.holiday_allowance,
-            u.payroll_id AS employee_id,
+    console.log("ME ROUTE HIT");
 
-            COALESCE(c.name,'') AS company_name,
-            COALESCE(c.is_pro,false) AS is_pro,
-            COALESCE(c.current_plan,'free') AS current_plan,
-            COALESCE(c.subscription_status,'free') AS subscription_status,
-
-            -- Calculate remaining holiday allowance
-            COALESCE(u.holiday_allowance, 20) - 
-            COALESCE(
-              (SELECT COUNT(*) 
-               FROM holidays h 
-               WHERE h.user_id = u.id 
-               AND h.status = 'approved'
-               AND h.start_date >= DATE_TRUNC('year', CURRENT_DATE)
-              ), 0
-            ) AS holiday_remaining
-
-          FROM users u
-          LEFT JOIN companies c
-          ON c.id = u.company_id
-
-          WHERE u.id = $1
-          LIMIT 1
-          `,
-          [req.user.id]
-        );
-      
-      const queryDuration = Date.now() - startTime;
-      console.log("AFTER DB QUERY - Duration:", queryDuration, "ms");
-      console.log("SENDING RESPONSE");
-      
-      res.json(
-        result.rows[0]
-      );
-    } catch (error) {
-      console.error("AUTH ME ERROR:", error.message);
-      res.status(500).json({
-        error:
-          error.message,
-      });
-    }
+    return res.json({
+      success: true,
+      user: req.user
+    });
   }
 );
 

@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://fieldsync-backend-clean-t7vn.onrender.com",
+  baseURL: "https://fieldsync-backend-clean.onrender.com/api",
   timeout: 10000,
 });
 

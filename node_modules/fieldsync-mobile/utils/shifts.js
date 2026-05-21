@@ -4,11 +4,13 @@ import { getCurrentUser } from "./session";
 /* =========================
    GET SHIFTS (HISTORY)
 ========================= */
-export async function getShifts() {
+export async function getShifts(options = {}) {
+  const { throwOnError = false } = options;
   const user = await getCurrentUser();
 
   if (!user) {
     console.log("NO USER");
+    if (throwOnError) throw new Error("No active session. Please sign in again.");
     return [];
   }
 
@@ -27,6 +29,7 @@ export async function getShifts() {
 
   if (error) {
     console.log("GET SHIFTS ERROR:", error);
+    if (throwOnError) throw error;
     return [];
   }
 

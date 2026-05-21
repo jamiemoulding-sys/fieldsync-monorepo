@@ -13,10 +13,7 @@ export async function getCurrentUser() {
     .eq("id", user.id)
     .single();
 
-  if (error) {
-    console.log("USER FETCH ERROR:", error);
-    return null;
-  }
+  if (error) return null;
 
   return data;
 }

@@ -159,7 +159,7 @@ export default function ClockIn() {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Ionicons name="calendar-outline" size={24} color="#6366f1" />
-          <Text style={styles.cardTitle}>Today's Shift</Text>
+          <Text style={styles.cardTitle}>{"Today's Shift"}</Text>
         </View>
         
         {shift ? (

@@ -1,13 +1,14 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  Alert,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  Alert,
 } from "react-native";
+import { setToken } from "../utils/auth";
 import { supabase } from "../utils/supabase";
 
 export default function Login() {
@@ -27,7 +28,7 @@ export default function Login() {
       setLoading(true);
 
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(), // 🔥 fix
+        email: email.trim().toLowerCase(),
         password,
       });
 
@@ -36,17 +37,16 @@ export default function Login() {
         return;
       }
 
-      // 🔥 IMPORTANT: confirm session exists
-      if (!data?.session) {
+      const token = data?.session?.access_token;
+
+      if (!token) {
         Alert.alert("Error", "No session returned");
         return;
       }
 
-      // ✅ SUCCESS
+      await setToken(token);
       router.replace("/(tabs)/dashboard");
-
-    } catch (err) {
-      console.log("LOGIN ERROR:", err);
+    } catch {
       Alert.alert("Error", "Something went wrong");
     } finally {
       setLoading(false);
@@ -63,7 +63,7 @@ export default function Login() {
         style={styles.input}
         value={email}
         onChangeText={setEmail}
-        autoCapitalize="none" // 🔥 important
+        autoCapitalize="none"
         keyboardType="email-address"
       />
 

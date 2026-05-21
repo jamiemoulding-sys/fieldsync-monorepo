@@ -5,7 +5,12 @@ import { getCurrentUser } from "./session";
    GET SHIFTS (HISTORY)
 ========================= */
 export async function getShifts(options = {}) {
-  const { throwOnError = false } = options;
+  const {
+    before,
+    from,
+    limit = 50,
+    throwOnError = false,
+  } = options;
   const user = await getCurrentUser();
 
   if (!user) {
@@ -14,7 +19,7 @@ export async function getShifts(options = {}) {
     return [];
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("shifts")
     .select(`
       *,
@@ -25,7 +30,18 @@ export async function getShifts(options = {}) {
     `)
     .eq("user_id", user.id)
     .eq("company_id", user.company_id)
-    .order("clock_in_time", { ascending: false });
+    .order("clock_in_time", { ascending: false })
+    .limit(limit);
+
+  if (from) {
+    query = query.gte("clock_in_time", from);
+  }
+
+  if (before) {
+    query = query.lt("clock_in_time", before);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.log("GET SHIFTS ERROR:", error);

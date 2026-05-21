@@ -4,6 +4,7 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
@@ -197,10 +198,13 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-[#0B1220]">
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#6366f1" size="large" />
-          <Text className="text-gray-400 mt-4">Loading profile...</Text>
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.loadingWrap}>
+          <View style={styles.loadingIcon}>
+            <ActivityIndicator color="#ffffff" size="large" />
+          </View>
+          <Text style={styles.loadingTitle}>Loading profile</Text>
+          <Text style={styles.loadingText}>Checking your secure session...</Text>
         </View>
       </SafeAreaView>
     );
@@ -222,9 +226,11 @@ export default function Profile() {
     : 0;
 
   return (
-    <SafeAreaView className="flex-1 bg-[#0B1220]">
+    <SafeAreaView style={styles.screen}>
       <ScrollView
-        className="bg-[#0B1220]"
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -234,193 +240,619 @@ export default function Profile() {
           />
         }
       >
-        <View className="p-4 pt-12 pb-8">
-          <View className="items-center mb-8">
-            <View className="w-28 h-28 bg-indigo-600 rounded-full items-center justify-center mb-4 shadow-lg">
-              <Text className="text-white text-4xl font-bold">{initials}</Text>
+        <View style={styles.headerCard}>
+          <View style={styles.headerTop}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials}</Text>
             </View>
-            <Text className="text-white text-2xl font-bold mb-1">
-              {formatText(user?.name)}
-            </Text>
-            <Text className="text-gray-400 text-base mb-1">
-              {formatText(user?.role)}
-            </Text>
-            {user?.company_name && (
-              <Text className="text-indigo-400 text-sm">
-                {user.company_name}
+            <View style={styles.headerText}>
+              <Text style={styles.name} numberOfLines={2}>
+                {formatText(user?.name)}
               </Text>
-            )}
-          </View>
-
-          {error ? (
-            <View className="bg-red-950/40 rounded-2xl p-5 mb-4 border border-red-900">
-              <View className="flex-row items-center mb-3">
-                <Ionicons name="alert-circle-outline" size={24} color="#f87171" />
-                <Text className="text-red-200 text-lg font-semibold ml-3">
-                  Profile unavailable
+              <View style={styles.rolePill}>
+                <Ionicons name="briefcase-outline" size={14} color="#a5b4fc" />
+                <Text style={styles.roleText} numberOfLines={1}>
+                  {formatText(user?.role)}
                 </Text>
               </View>
-              <Text className="text-red-100 mb-4">{error}</Text>
-              <View className="flex-row gap-3">
-                <TouchableOpacity
-                  onPress={loadUser}
-                  className="bg-red-600 px-4 py-3 rounded-xl"
-                >
-                  <Text className="text-white font-semibold">Retry</Text>
+            </View>
+          </View>
+
+          <View style={styles.companyRow}>
+            <Ionicons name="business-outline" size={18} color="#94a3b8" />
+            <Text style={styles.companyText} numberOfLines={1}>
+              {formatText(user?.company_name)}
+            </Text>
+          </View>
+        </View>
+
+        {error ? (
+          <View style={styles.errorCard}>
+            <View style={styles.errorIcon}>
+              <Ionicons name="alert-circle-outline" size={28} color="#fecaca" />
+            </View>
+            <View style={styles.errorBody}>
+              <Text style={styles.errorTitle}>Profile unavailable</Text>
+              <Text style={styles.errorText}>{error}</Text>
+              <View style={styles.errorActions}>
+                <TouchableOpacity style={styles.retryButton} onPress={loadUser}>
+                  <Text style={styles.retryText}>Retry</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  style={styles.errorClearButton}
                   onPress={clearAuthCache}
                   disabled={clearingCache}
-                  className="bg-gray-800 px-4 py-3 rounded-xl"
                 >
-                  <Text className="text-white font-semibold">
-                    {clearingCache ? "Clearing..." : "Clear Auth Cache"}
+                  <Text style={styles.errorClearText}>
+                    {clearingCache ? "Clearing..." : "Clear cache"}
                   </Text>
                 </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        <SectionCard title="Contact" icon="person-circle-outline">
+          <InfoRow icon="mail-outline" label="Email" value={formatText(user?.email)} />
+          <InfoRow icon="call-outline" label="Phone" value={formatText(user?.phone)} />
+        </SectionCard>
+
+        <SectionCard title="Pay" icon="cash-outline">
+          <View style={styles.metricGrid}>
+            <MetricCard
+              label="Hourly Rate"
+              value={formatRate(user?.hourly_rate)}
+              icon="time-outline"
+            />
+            <MetricCard
+              label="Overtime Rate"
+              value={formatRate(user?.overtime_rate)}
+              icon="trending-up-outline"
+            />
+          </View>
+        </SectionCard>
+
+        <SectionCard title="Holiday" icon="calendar-outline">
+          <View style={styles.metricGrid}>
+            <MetricCard
+              label="Allowance"
+              value={formatDays(user?.holiday_allowance)}
+              icon="calendar-number-outline"
+            />
+            <MetricCard
+              label="Remaining"
+              value={formatDays(user?.holiday_remaining)}
+              icon="sparkles-outline"
+              accent
+            />
+          </View>
+          {holidayAllowance > 0 ? (
+            <View style={styles.progressBlock}>
+              <View style={styles.progressHeader}>
+                <Text style={styles.progressLabel}>Holiday balance</Text>
+                <Text style={styles.progressValue}>{Math.round(holidayPercent)}%</Text>
+              </View>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${holidayPercent}%` }]} />
               </View>
             </View>
           ) : null}
+        </SectionCard>
 
-          <View className="bg-[#111827] rounded-2xl p-5 mb-4 shadow-lg border border-gray-800">
-            <View className="flex-row items-center mb-4">
-              <Ionicons name="person-circle-outline" size={24} color="#6366f1" />
-              <Text className="text-white text-lg font-semibold ml-3">
-                Contact Information
-              </Text>
-            </View>
-            <View className="space-y-4">
-              <ProfileField label="Full Name" value={formatText(user?.name)} />
-              <ProfileField label="Email" value={formatText(user?.email)} />
-              <ProfileField label="Phone" value={formatText(user?.phone)} />
-              {user?.employee_id && (
-                <ProfileField label="Employee ID" value={formatText(user.employee_id)} />
-              )}
-            </View>
-          </View>
-
-          <View className="bg-[#111827] rounded-2xl p-5 mb-4 shadow-lg border border-gray-800">
-            <View className="flex-row items-center mb-4">
-              <Ionicons name="cash-outline" size={24} color="#6366f1" />
-              <Text className="text-white text-lg font-semibold ml-3">
-                Pay Information
-              </Text>
-            </View>
-            <View className="space-y-4">
-              <ProfileField label="Hourly Rate" value={formatRate(user?.hourly_rate)} />
-              <ProfileField label="Overtime Rate" value={formatRate(user?.overtime_rate)} />
-            </View>
-          </View>
-
-          <View className="bg-[#111827] rounded-2xl p-5 mb-4 shadow-lg border border-gray-800">
-            <View className="flex-row items-center mb-4">
-              <Ionicons name="calendar-outline" size={24} color="#6366f1" />
-              <Text className="text-white text-lg font-semibold ml-3">
-                Holiday Information
-              </Text>
-            </View>
-            <View className="space-y-4">
-              <ProfileField
-                label="Holiday Allowance"
-                value={formatDays(user?.holiday_allowance)}
-              />
-              <ProfileField
-                label="Remaining Holiday"
-                value={formatDays(user?.holiday_remaining)}
-                valueClassName="text-indigo-400 font-medium text-base"
-              />
-              {holidayAllowance > 0 && (
-                <View className="mt-2">
-                  <View className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                    <View
-                      className="h-full bg-indigo-500 rounded-full"
-                      style={{ width: `${holidayPercent}%` }}
-                    />
-                  </View>
-                  <Text className="text-gray-500 text-xs mt-1">
-                    {Math.round(holidayPercent)}% remaining
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-
-          <View className="bg-[#111827] rounded-2xl p-5 mb-4 shadow-lg border border-gray-800">
-            <View className="flex-row items-center mb-4">
-              <Ionicons name="information-circle-outline" size={24} color="#6366f1" />
-              <Text className="text-white text-lg font-semibold ml-3">
-                Account Information
-              </Text>
-            </View>
-            <View className="space-y-4">
-              <ProfileField label="Role" value={formatText(user?.role)} />
-              {user?.company_id && (
-                <ProfileField label="Company ID" value={formatText(user.company_id)} />
-              )}
-              {user?.created_at && (
-                <ProfileField
-                  label="Member Since"
-                  value={new Date(user.created_at).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric",
-                  })}
-                />
-              )}
-            </View>
-          </View>
-
-          <View className="bg-[#111827] rounded-2xl p-5 mb-4 shadow-lg border border-gray-800">
-            <View className="flex-row items-center mb-4">
-              <Ionicons name="settings-outline" size={24} color="#6366f1" />
-              <Text className="text-white text-lg font-semibold ml-3">
-                Account Actions
-              </Text>
-            </View>
-            <View className="space-y-3">
-              <TouchableOpacity className="bg-gray-800 p-4 rounded-xl flex-row items-center">
-                <Ionicons name="lock-closed-outline" size={20} color="#9ca3af" />
-                <Text className="text-white font-medium ml-3 flex-1">
-                  Change Password
-                </Text>
-                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
-              </TouchableOpacity>
-              <TouchableOpacity className="bg-gray-800 p-4 rounded-xl flex-row items-center">
-                <Ionicons name="create-outline" size={20} color="#9ca3af" />
-                <Text className="text-white font-medium ml-3 flex-1">
-                  Edit Profile
-                </Text>
-                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={clearAuthCache}
-                disabled={clearingCache}
-                className="bg-gray-800 p-4 rounded-xl flex-row items-center"
-              >
-                <Ionicons name="trash-outline" size={20} color="#f87171" />
-                <Text className="text-white font-medium ml-3 flex-1">
-                  {clearingCache ? "Clearing Auth Cache..." : "Clear Auth Cache"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            onPress={handleLogout}
-            className="bg-red-600 p-4 rounded-xl items-center shadow-lg mb-8"
-          >
-            <Text className="text-white font-semibold text-base">Sign Out</Text>
+        <SectionCard title="Account" icon="settings-outline">
+          <ActionRow
+            icon="lock-closed-outline"
+            title="Change Password"
+            subtitle="Manage your sign-in credentials"
+          />
+          <ActionRow
+            icon="trash-outline"
+            title={clearingCache ? "Clearing Auth Cache..." : "Clear Auth Cache"}
+            subtitle="Remove stale local session data"
+            iconColor="#f87171"
+            onPress={clearAuthCache}
+            disabled={clearingCache}
+          />
+          <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={20} color="#ffffff" />
+            <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
-        </View>
+        </SectionCard>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function ProfileField({ label, value, valueClassName = "text-white font-medium text-base" }) {
+function SectionCard({ title, icon, children }) {
   return (
-    <View>
-      <Text className="text-gray-400 text-sm mb-1">{label}</Text>
-      <Text className={valueClassName}>{value}</Text>
+    <View style={styles.card}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionIcon}>
+          <Ionicons name={icon} size={20} color="#a5b4fc" />
+        </View>
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      {children}
     </View>
   );
 }
+
+function InfoRow({ icon, label, value }) {
+  return (
+    <View style={styles.infoRow}>
+      <View style={styles.infoIcon}>
+        <Ionicons name={icon} size={18} color="#94a3b8" />
+      </View>
+      <View style={styles.infoBody}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={styles.infoValue} numberOfLines={2}>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function MetricCard({ label, value, icon, accent = false }) {
+  return (
+    <View style={[styles.metricCard, accent && styles.metricCardAccent]}>
+      <View style={styles.metricIcon}>
+        <Ionicons name={icon} size={18} color={accent ? "#c4b5fd" : "#94a3b8"} />
+      </View>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text style={[styles.metricValue, accent && styles.metricValueAccent]} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function ActionRow({ icon, title, subtitle, onPress, disabled, iconColor = "#94a3b8" }) {
+  return (
+    <TouchableOpacity
+      style={[styles.actionRow, disabled && styles.disabled]}
+      onPress={onPress}
+      disabled={disabled || !onPress}
+      activeOpacity={onPress ? 0.75 : 1}
+    >
+      <View style={styles.actionIcon}>
+        <Ionicons name={icon} size={20} color={iconColor} />
+      </View>
+      <View style={styles.actionBody}>
+        <Text style={styles.actionTitle}>{title}</Text>
+        <Text style={styles.actionSubtitle}>{subtitle}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color="#64748b" />
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: "#020617",
+  },
+
+  scroll: {
+    flex: 1,
+    backgroundColor: "#020617",
+  },
+
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 36,
+  },
+
+  loadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "#020617",
+  },
+
+  loadingIcon: {
+    width: 76,
+    height: 76,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#6366f1",
+    marginBottom: 20,
+  },
+
+  loadingTitle: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+
+  loadingText: {
+    color: "#94a3b8",
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: "center",
+  },
+
+  headerCard: {
+    backgroundColor: "#0f172a",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "#1e293b",
+    padding: 20,
+    marginBottom: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 5,
+  },
+
+  headerTop: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  avatar: {
+    width: 82,
+    height: 82,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#6366f1",
+    borderWidth: 1,
+    borderColor: "#818cf8",
+    marginRight: 16,
+  },
+
+  avatarText: {
+    color: "#ffffff",
+    fontSize: 30,
+    fontWeight: "900",
+  },
+
+  headerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  name: {
+    color: "#ffffff",
+    fontSize: 26,
+    lineHeight: 31,
+    fontWeight: "900",
+  },
+
+  rolePill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1e1b4b",
+    borderWidth: 1,
+    borderColor: "#3730a3",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 10,
+    maxWidth: "100%",
+  },
+
+  roleText: {
+    color: "#c7d2fe",
+    fontSize: 13,
+    fontWeight: "700",
+    marginLeft: 6,
+    textTransform: "capitalize",
+  },
+
+  companyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 18,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+
+  companyText: {
+    color: "#cbd5e1",
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 10,
+    flex: 1,
+  },
+
+  card: {
+    backgroundColor: "#0f172a",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#1e293b",
+    padding: 18,
+    marginBottom: 16,
+  },
+
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+
+  sectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#273449",
+  },
+
+  sectionTitle: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "800",
+    marginLeft: 12,
+  },
+
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    marginBottom: 10,
+  },
+
+  infoIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#020617",
+    marginRight: 12,
+  },
+
+  infoBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  infoLabel: {
+    color: "#94a3b8",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+
+  infoValue: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+
+  metricGrid: {
+    flexDirection: "row",
+    gap: 12,
+  },
+
+  metricCard: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: "#111827",
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+
+  metricCardAccent: {
+    borderColor: "#3730a3",
+    backgroundColor: "#15173a",
+  },
+
+  metricIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#020617",
+    marginBottom: 12,
+  },
+
+  metricLabel: {
+    color: "#94a3b8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  metricValue: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 5,
+  },
+
+  metricValueAccent: {
+    color: "#c4b5fd",
+  },
+
+  progressBlock: {
+    marginTop: 16,
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+
+  progressHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+
+  progressLabel: {
+    color: "#cbd5e1",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  progressValue: {
+    color: "#a5b4fc",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  progressTrack: {
+    height: 9,
+    borderRadius: 999,
+    backgroundColor: "#020617",
+    overflow: "hidden",
+  },
+
+  progressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#6366f1",
+  },
+
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    marginBottom: 10,
+  },
+
+  actionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#020617",
+    marginRight: 12,
+  },
+
+  actionBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  actionTitle: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  actionSubtitle: {
+    color: "#94a3b8",
+    fontSize: 12,
+    marginTop: 3,
+  },
+
+  signOutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#dc2626",
+    borderRadius: 16,
+    paddingVertical: 16,
+    marginTop: 4,
+  },
+
+  signOutText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "900",
+    marginLeft: 8,
+  },
+
+  disabled: {
+    opacity: 0.6,
+  },
+
+  errorCard: {
+    flexDirection: "row",
+    backgroundColor: "#3f1018",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#7f1d1d",
+    padding: 16,
+    marginBottom: 16,
+  },
+
+  errorIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#7f1d1d",
+    marginRight: 12,
+  },
+
+  errorBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  errorTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  errorText: {
+    color: "#fecaca",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+
+  errorActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+  },
+
+  retryButton: {
+    backgroundColor: "#dc2626",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+
+  retryText: {
+    color: "#ffffff",
+    fontWeight: "800",
+  },
+
+  errorClearButton: {
+    backgroundColor: "#111827",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
+
+  errorClearText: {
+    color: "#ffffff",
+    fontWeight: "800",
+  },
+});

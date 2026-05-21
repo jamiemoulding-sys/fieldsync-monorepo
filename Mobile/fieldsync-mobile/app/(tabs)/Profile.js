@@ -439,6 +439,8 @@ const styles = StyleSheet.create({
   },
 
   content: {
+    flexGrow: 1,
+    backgroundColor: "#020617",
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 36,

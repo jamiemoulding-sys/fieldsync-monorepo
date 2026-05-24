@@ -1,41 +1,39 @@
-const { Pool } = require('pg');
+const { Pool } = require("pg");
+const logger = require("../utils/logger");
 
-console.log("📡 Initializing DB connection...");
-console.log("📡 DATABASE_URL:", process.env.DATABASE_URL ? "Loaded ✅" : "Missing ❌");
-
-const connectionString = process.env.DATABASE_URL;
-
-// 🔥 FORCE SSL PROPERLY (this is the key fix)
 const pool = new Pool({
-  connectionString,
-  ssl: process.env.NODE_ENV === 'production'
-    ? { rejectUnauthorized: false }
-    : false
+  connectionString: process.env.DATABASE_URL,
+  ssl:
+    process.env.NODE_ENV === "production"
+      ? { rejectUnauthorized: false }
+      : false,
 });
 
-// 🔥 Test connection
 (async () => {
   try {
     const client = await pool.connect();
-    console.log('✅ DATABASE CONNECTED');
+    logger.info("Database connected");
     client.release();
   } catch (err) {
-    console.error('💥 DATABASE CONNECTION FAILED:', err);
+    logger.error("Database connection failed", err);
   }
 })();
 
-// 🔥 Query wrapper with timeout
 module.exports = {
   query: async (text, params) => {
     try {
       const startTime = Date.now();
       const result = await pool.query(text, params);
       const duration = Date.now() - startTime;
-      console.log(`📊 Query completed in ${duration}ms`);
+
+      if (duration > 1000) {
+        logger.warn("Slow database query", { duration });
+      }
+
       return result;
     } catch (err) {
-      console.error("💥 QUERY ERROR:", err);
+      logger.error("Database query failed", err);
       throw err;
     }
-  }
+  },
 };

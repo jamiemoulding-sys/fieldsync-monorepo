@@ -1,15 +1,15 @@
-// 🔥 SUPABASE FIX (Headers issue)
 require("dotenv").config();
 require("cross-fetch/polyfill");
-
-console.log("CORRECT BACKEND INDEX LOADED");
-
 
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
 
-/* ROUTES */
+const config = require("./config/env");
+const { query } = require("./database/connection");
+const { notFound, errorHandler } = require("./middleware/errorHandler");
+const logger = require("./utils/logger");
+
 const authRoutes = require("./routes/auth");
 const shiftRoutes = require("./routes/shifts");
 const taskRoutes = require("./routes/tasks");
@@ -31,62 +31,19 @@ const payslipRoutes = require("./routes/payslips");
 
 const app = express();
 
-const PORT =
-  process.env.PORT || 10000;
-
-/* =====================
-   TRUST PROXY
-===================== */
-app.set(
-  "trust proxy",
-  1
-);
-
-/* =====================
-   CORS FIXED
-===================== */
-const allowedOrigins = [
-  "https://app.zorviatech.co.uk",
-  "https://www.app.zorviatech.co.uk",
-  "http://localhost:3000",
-];
+app.set("trust proxy", 1);
 
 app.use(
   cors({
-    origin: function (
-      origin,
-      callback
-    ) {
-      if (
-        !origin ||
-        allowedOrigins.includes(
-          origin
-        )
-      ) {
-        return callback(
-          null,
-          true
-        );
+    origin(origin, callback) {
+      if (!origin || config.allowedOrigins.includes(origin)) {
+        return callback(null, true);
       }
 
-      return callback(
-        new Error(
-          "Blocked by CORS"
-        )
-      );
+      return callback(new Error("Blocked by CORS"));
     },
-
     credentials: true,
-
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS",
-    ],
-
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -94,25 +51,12 @@ app.use(
       "x-client-info",
       "Prefer",
     ],
-
-    exposedHeaders: [
-      "Content-Range",
-      "X-Total-Count",
-    ],
+    exposedHeaders: ["Content-Range", "X-Total-Count"],
   })
 );
 
-/* PRE-FLIGHT */
-app.options(
-  "*",
-  cors()
-);
+app.options("*", cors());
 
-/* =====================
-   BODY PARSER
-===================== */
-
-/* STRIPE WEBHOOK RAW FIRST */
 app.use(
   "/api/billing/webhook",
   express.raw({
@@ -120,206 +64,65 @@ app.use(
   })
 );
 
-app.use(
-  express.json({
-    limit: "10mb",
-  })
-);
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: "10mb",
-  })
-);
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-/* =====================
-   STATIC
-===================== */
-app.use(
-  "/uploads",
-  express.static(
-    path.join(
-      __dirname,
-      "uploads"
-    )
-  )
-);
-
-/* =====================
-   HEALTH
-===================== */
-app.get(
-  "/api/health",
-  (req, res) => {
-    res.json({
+app.get("/api/health", async (req, res) => {
+  try {
+    await query("SELECT 1");
+    return res.json({
       status: "OK",
-      uptime:
-        process.uptime(),
-      env:
-        process.env
-          .NODE_ENV ||
-        "development",
-      timestamp:
-        new Date()
-          .toISOString(),
+      database: "OK",
+      uptime: process.uptime(),
+      env: process.env.NODE_ENV || "development",
+      timestamp: new Date().toISOString(),
+    });
+  } catch {
+    return res.status(503).json({
+      status: "DEGRADED",
+      database: "ERROR",
+      timestamp: new Date().toISOString(),
     });
   }
-);
+});
 
-/* =====================
-   API ROUTES
-===================== */
-
-app.use(
-  "/api/auth",
-  authRoutes
-);
-
-app.use(
-  "/api/shifts",
-  shiftRoutes
-);
-
-app.use(
-  "/api/tasks",
-  taskRoutes
-);
-
-app.use(
-  "/api/locations",
-  locationRoutes
-);
-
-app.use(
-  "/api/uploads",
-  uploadRoutes
-);
-
-app.use(
-  "/api/assignments",
-  assignmentRoutes
-);
-
-app.use(
-  "/api/users",
-  userRoutes
-);
-
-app.use(
-  "/api/payments",
-  paymentRoutes
-);
-
-app.use(
-  "/api/schedules",
-  scheduleRoutes
-);
-
-app.use(
-  "/api/companies",
-  companyRoutes
-);
-
-app.use(
-  "/api/invite",
-  inviteRoutes
-);
-
-app.use(
-  "/api/reports",
-  reportRoutes
-);
-
-app.use(
-  "/api/billing",
-  billingRoutes
-);
-
-app.use(
-  "/api/performance",
-  performanceRoutes
-);
-
-app.use(
-  "/api/dashboard",
-  dashboardRoutes
-);
-
-app.use(
-  "/api/announcements",
-  announcementRoutes
-);
-
-app.use(
-  "/api/tracking",
-  trackingRoutes
-);
-
-app.use(
-  "/api/payslips",
-  payslipRoutes
-);
-
-/* =====================
-   ROOT
-===================== */
-app.get(
-  "/",
-  (req, res) => {
-    res.send(
-      "🚀 Zorvia API Running"
-    );
+app.get("/api/ready", async (req, res) => {
+  try {
+    await query("SELECT 1");
+    return res.json({ ready: true });
+  } catch {
+    return res.status(503).json({ ready: false });
   }
-);
+});
 
-/* =====================
-   404
-===================== */
-app.use(
-  "*",
-  (req, res) => {
-    res.status(404).json({
-      error:
-        "Route not found",
-    });
-  }
-);
+app.use("/api/auth", authRoutes);
+app.use("/api/shifts", shiftRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/locations", locationRoutes);
+app.use("/api/uploads", uploadRoutes);
+app.use("/api/assignments", assignmentRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/schedules", scheduleRoutes);
+app.use("/api/companies", companyRoutes);
+app.use("/api/invite", inviteRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/billing", billingRoutes);
+app.use("/api/performance", performanceRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/announcements", announcementRoutes);
+app.use("/api/tracking", trackingRoutes);
+app.use("/api/payslips", payslipRoutes);
 
-/* =====================
-   GLOBAL ERROR HANDLER
-===================== */
-app.use(
-  (
-    err,
-    req,
-    res,
-    next
-  ) => {
-    console.error(
-      "💥 SERVER ERROR:",
-      err
-    );
+app.get("/", (req, res) => {
+  res.send("Zorvia API Running");
+});
 
-    res.status(
-      err.status || 500
-    ).json({
-      error:
-        err.message ||
-        "Internal server error",
-    });
-  }
-);
+app.use("*", notFound);
+app.use(errorHandler);
 
-/* =====================
-   START SERVER
-===================== */
-app.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-    console.log(
-      `🚀 Server running on port ${PORT}`
-    );
-  }
-);
+app.listen(config.port, "0.0.0.0", () => {
+  logger.info(`Server running on port ${config.port}`);
+});

@@ -7,8 +7,6 @@ const {
   requireCompany,
 } = require('../middleware/auth');
 
-// 🔥 CONFIRM THIS FILE IS RUNNING
-console.log('🚀 NEW COMPANIES ROUTE ACTIVE');
 
 
 // 🏢 CREATE COMPANY

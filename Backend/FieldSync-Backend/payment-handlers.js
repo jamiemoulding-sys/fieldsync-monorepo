@@ -30,12 +30,6 @@ const handleGooglePlayPayment = async (productId, employeeCount, currency) => {
     // In a real implementation, you would integrate with Google Play Billing Library
     // For demo purposes, we'll simulate the payment flow
     
-    console.log('Initiating Google Play Store payment:', {
-      productId,
-      employeeCount,
-      currency
-    });
-
     // Check if Google Play Billing is available
     if (!window.googlePlayBilling) {
       throw new Error('Google Play Billing not available');
@@ -140,7 +134,8 @@ const handleGooglePayPayment = async (employeeCount, currency) => {
     const paymentData = await paymentsClient.loadPaymentData(paymentRequest);
 
     // Process payment through your payment processor
-    const response = await fetch('https://fieldsync-backend.onrender.com/api/payments/process-google-play', {
+    const apiBaseUrl = process.env.API_BASE_URL || '/api';
+    const response = await fetch(`${apiBaseUrl}/payments/process-google-play`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

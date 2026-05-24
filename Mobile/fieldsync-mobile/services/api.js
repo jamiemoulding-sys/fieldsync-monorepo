@@ -1,9 +1,10 @@
 import axios from "axios";
 import { supabase } from "../utils/supabase";
 import { getToken, removeToken, setToken } from "../utils/auth";
+import { API_BASE_URL } from "../config/env";
 
 const API = axios.create({
-  baseURL: "https://fieldsync-backend-clean.onrender.com/api",
+  baseURL: API_BASE_URL,
   timeout: 10000,
 });
 
@@ -34,6 +35,13 @@ API.interceptors.response.use(
       await supabase.auth.signOut({ scope: "local" });
     }
 
+    const message =
+      error.response?.data?.error ||
+      error.response?.data?.message ||
+      error.message ||
+      "Request failed";
+
+    error.userMessage = message;
     return Promise.reject(error);
   }
 );

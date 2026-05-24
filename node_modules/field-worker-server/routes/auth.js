@@ -1,6 +1,3 @@
-console.log("🔥 AUTH ROUTES LOADED");
-console.log("CORRECT AUTH ROUTES FILE LOADED");
-
 const express = require("express");
 const router = express.Router();
 const ws = require("ws");
@@ -456,8 +453,6 @@ router.get(
   "/me",
   authenticateToken,
   async (req, res) => {
-    console.log("ME ROUTE HIT");
-
     return res.json({
       success: true,
       user: req.user

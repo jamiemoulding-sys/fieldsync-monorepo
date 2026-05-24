@@ -52,7 +52,24 @@ export const reportAPI = {
   },
 
   getPayslips: async () => {
-    const response = await API.get("/reports/payslips");
+    const response = await API.get("/payslips");
+    return response.data;
+  },
+};
+
+export const payslipAPI = {
+  getAll: async () => {
+    const response = await API.get("/payslips");
+    return response.data;
+  },
+
+  getById: async (id) => {
+    const response = await API.get(`/payslips/${id}`);
+    return response.data;
+  },
+
+  getDownload: async (id) => {
+    const response = await API.get(`/payslips/${id}/download`);
     return response.data;
   },
 };

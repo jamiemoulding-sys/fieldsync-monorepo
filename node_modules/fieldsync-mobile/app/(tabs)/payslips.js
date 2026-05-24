@@ -1,8 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Alert,
   Linking,
   Modal,
   RefreshControl,
@@ -13,7 +16,9 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { reportAPI } from "../../services/api";
+import { payslipAPI } from "../../services/api";
+
+const DOWNLOADED_PAYSLIPS_KEY = "fieldsync_downloaded_payslips";
 
 const coalesce = (...values) =>
   values.find((value) => value !== undefined && value !== null && value !== "");
@@ -39,14 +44,6 @@ const getHours = (payslip) =>
 
 const getDateSent = (payslip) =>
   coalesce(payslip.sent_at, payslip.date_sent, payslip.published_at, payslip.created_at);
-
-const getSecureUrl = (payslip) =>
-  coalesce(
-    payslip.signed_url,
-    payslip.secure_url,
-    payslip.view_url,
-    payslip.download_url
-  );
 
 const getFilePath = (payslip) => coalesce(payslip.file_path, payslip.storage_path);
 
@@ -86,6 +83,33 @@ const sortPayslips = (items) =>
     return (Number.isNaN(bDate) ? 0 : bDate) - (Number.isNaN(aDate) ? 0 : aDate);
   });
 
+async function getDownloadedPayslips() {
+  const raw = await AsyncStorage.getItem(DOWNLOADED_PAYSLIPS_KEY);
+  return raw ? JSON.parse(raw) : {};
+}
+
+async function saveDownloadedPayslip(id, data) {
+  const current = await getDownloadedPayslips();
+  const next = {
+    ...current,
+    [id]: {
+      ...data,
+      downloaded_at: new Date().toISOString(),
+    },
+  };
+
+  await AsyncStorage.setItem(DOWNLOADED_PAYSLIPS_KEY, JSON.stringify(next));
+  return next;
+}
+
+function withDownloadedState(items, downloaded) {
+  return items.map((item) => ({
+    ...item,
+    downloaded_at: downloaded[item.id]?.downloaded_at || null,
+    local_uri: downloaded[item.id]?.local_uri || null,
+  }));
+}
+
 export default function Payslips() {
   const [payslips, setPayslips] = useState([]);
   const [selectedPayslip, setSelectedPayslip] = useState(null);
@@ -93,6 +117,7 @@ export default function Payslips() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [setupMissing, setSetupMissing] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
 
   const sheetAnim = useRef(new Animated.Value(0)).current;
 
@@ -107,8 +132,12 @@ export default function Payslips() {
       setError("");
       setSetupMissing(false);
 
-      const data = await reportAPI.getPayslips();
-      setPayslips(sortPayslips(normalizePayslips(data)));
+      const [data, downloaded] = await Promise.all([
+        payslipAPI.getAll(),
+        getDownloadedPayslips(),
+      ]);
+
+      setPayslips(sortPayslips(withDownloadedState(normalizePayslips(data), downloaded)));
     } catch (loadError) {
       const status = loadError.response?.status;
       setPayslips([]);
@@ -163,6 +192,83 @@ export default function Payslips() {
       duration: 180,
       useNativeDriver: true,
     }).start(() => setSelectedPayslip(null));
+  };
+
+  const markDownloaded = async (payslip, localUri, fileName) => {
+    const downloaded = await saveDownloadedPayslip(payslip.id, {
+      local_uri: localUri,
+      file_name: fileName,
+    });
+
+    setPayslips((current) =>
+      sortPayslips(withDownloadedState(current, downloaded))
+    );
+
+    setSelectedPayslip((current) =>
+      current?.id === payslip.id
+        ? {
+            ...current,
+            downloaded_at: downloaded[payslip.id]?.downloaded_at,
+            local_uri: localUri,
+          }
+        : current
+    );
+  };
+
+  const viewPayslip = async (payslip) => {
+    if (!payslip?.id) return;
+
+    try {
+      setActionLoadingId(`view-${payslip.id}`);
+      const detail = await payslipAPI.getById(payslip.id);
+      const secureUrl = detail.view_url || detail.signed_url;
+
+      if (!secureUrl) {
+        throw new Error("Secure viewing link unavailable.");
+      }
+
+      await Linking.openURL(secureUrl);
+    } catch (viewError) {
+      Alert.alert("Payslip unavailable", viewError.message || "Could not open this payslip.");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const downloadPayslip = async (payslip) => {
+    if (!payslip?.id) return;
+
+    try {
+      setActionLoadingId(`download-${payslip.id}`);
+      const data = await payslipAPI.getDownload(payslip.id);
+      const downloadUrl = data.download_url;
+
+      if (!downloadUrl) {
+        throw new Error("Secure download link unavailable.");
+      }
+
+      const safeName =
+        (data.file_name || `payslip-${payslip.id}.pdf`).replace(/[\\/]/g, "-");
+      const baseDirectory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+
+      if (!baseDirectory) {
+        throw new Error("Local document storage is unavailable on this device.");
+      }
+
+      const localUri = `${baseDirectory}${safeName}`;
+
+      await FileSystem.downloadAsync(downloadUrl, localUri);
+      await markDownloaded(payslip, localUri, safeName);
+
+      Alert.alert("Payslip saved", "The PDF was saved locally on this device.");
+    } catch (downloadError) {
+      Alert.alert(
+        "Download failed",
+        downloadError.message || "Could not save this payslip."
+      );
+    } finally {
+      setActionLoadingId(null);
+    }
   };
 
   if (loading) {
@@ -263,6 +369,9 @@ export default function Payslips() {
         payslip={selectedPayslip}
         sheetAnim={sheetAnim}
         onClose={closePayslip}
+        onView={viewPayslip}
+        onDownload={downloadPayslip}
+        actionLoadingId={actionLoadingId}
       />
     </SafeAreaView>
   );
@@ -280,7 +389,6 @@ function SummaryMetric({ label, value, accent = false }) {
 }
 
 function PayslipCard({ payslip, onPress }) {
-  const hasSecureUrl = !!getSecureUrl(payslip);
   const statusText = payslip.downloaded_at ? "Downloaded" : "Available";
 
   return (
@@ -317,12 +425,12 @@ function PayslipCard({ payslip, onPress }) {
       <View style={styles.cardFooter}>
         <View style={styles.securityRow}>
           <Ionicons
-            name={hasSecureUrl ? "lock-closed-outline" : "cloud-offline-outline"}
+            name="lock-closed-outline"
             size={15}
-            color={hasSecureUrl ? "#86efac" : "#fbbf24"}
+            color="#86efac"
           />
           <Text style={styles.securityText}>
-            {hasSecureUrl ? "Secure PDF link ready" : "Secure PDF link unavailable"}
+            Secure PDF link created on request
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color="#64748b" />
@@ -358,7 +466,7 @@ function EmptyState({ setupMissing }) {
   );
 }
 
-function PayslipSheet({ payslip, sheetAnim, onClose }) {
+function PayslipSheet({ payslip, sheetAnim, onClose, onView, onDownload, actionLoadingId }) {
   const translateY = sheetAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [500, 0],
@@ -366,13 +474,9 @@ function PayslipSheet({ payslip, sheetAnim, onClose }) {
 
   if (!payslip) return null;
 
-  const secureUrl = getSecureUrl(payslip);
   const filePath = getFilePath(payslip);
-
-  const openSecureUrl = async () => {
-    if (!secureUrl) return;
-    await Linking.openURL(secureUrl);
-  };
+  const viewing = actionLoadingId === `view-${payslip.id}`;
+  const downloading = actionLoadingId === `download-${payslip.id}`;
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
@@ -399,32 +503,40 @@ function PayslipSheet({ payslip, sheetAnim, onClose }) {
             value={filePath ? "Stored securely" : "Not provided"}
           />
 
-          {!secureUrl ? (
-            <View style={styles.missingLinkBox}>
-              <Ionicons name="lock-closed-outline" size={20} color="#fbbf24" />
-              <Text style={styles.missingLinkText}>
-                This payslip needs a backend-generated signed URL before it can be
-                viewed or downloaded.
-              </Text>
-            </View>
-          ) : null}
+          <View style={styles.missingLinkBox}>
+            <Ionicons name="lock-closed-outline" size={20} color="#fbbf24" />
+            <Text style={styles.missingLinkText}>
+              A short-lived signed link will be created only when you view or save
+              this PDF.
+            </Text>
+          </View>
 
           <View style={styles.sheetActions}>
             <TouchableOpacity
-              style={[styles.sheetButton, !secureUrl && styles.sheetButtonDisabled]}
-              onPress={openSecureUrl}
-              disabled={!secureUrl}
+              style={[styles.sheetButton, viewing && styles.sheetButtonDisabled]}
+              onPress={() => onView(payslip)}
+              disabled={viewing || downloading}
             >
-              <Ionicons name="eye-outline" size={19} color="#ffffff" />
-              <Text style={styles.sheetButtonText}>View PDF</Text>
+              {viewing ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Ionicons name="eye-outline" size={19} color="#ffffff" />
+              )}
+              <Text style={styles.sheetButtonText}>{viewing ? "Opening..." : "View PDF"}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.sheetButtonSecondary, !secureUrl && styles.sheetButtonDisabled]}
-              onPress={openSecureUrl}
-              disabled={!secureUrl}
+              style={[styles.sheetButtonSecondary, downloading && styles.sheetButtonDisabled]}
+              onPress={() => onDownload(payslip)}
+              disabled={viewing || downloading}
             >
-              <Ionicons name="download-outline" size={19} color="#c7d2fe" />
-              <Text style={styles.sheetButtonSecondaryText}>Save Locally</Text>
+              {downloading ? (
+                <ActivityIndicator color="#c7d2fe" />
+              ) : (
+                <Ionicons name="download-outline" size={19} color="#c7d2fe" />
+              )}
+              <Text style={styles.sheetButtonSecondaryText}>
+                {downloading ? "Saving..." : "Save Locally"}
+              </Text>
             </TouchableOpacity>
           </View>
         </Animated.View>

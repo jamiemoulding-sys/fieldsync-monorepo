@@ -1,7 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../database/connection');
-const { authenticateToken } = require('../middleware/auth');
+const {
+  authenticateToken,
+  requireCompany,
+  requireRole,
+} = require('../middleware/auth');
 const { getDistanceInMeters } = require('../utils/distance');
 const { 
   clockInRequestSchema,
@@ -59,7 +63,7 @@ const logActivity = async (userId, companyId, action, metadata = {}) => {
 // =======================
 // ✅ CLOCK IN
 // =======================
-router.post('/clock-in', authenticateToken, async (req, res) => {
+router.post('/clock-in', authenticateToken, requireCompany, async (req, res) => {
   try {
     const userId = req.user.id;
     const companyId = req.user.companyId;
@@ -202,7 +206,7 @@ router.post('/clock-in', authenticateToken, async (req, res) => {
 // =======================
 // ✅ CLOCK OUT
 // =======================
-router.post('/clock-out', authenticateToken, async (req, res) => {
+router.post('/clock-out', authenticateToken, requireCompany, async (req, res) => {
   try {
     const userId = req.user.id;
     const companyId = req.user.companyId;
@@ -310,7 +314,7 @@ router.post('/clock-out', authenticateToken, async (req, res) => {
 // =======================
 // ⏸️ START BREAK
 // =======================
-router.post('/break/start', authenticateToken, async (req, res) => {
+router.post('/break/start', authenticateToken, requireCompany, async (req, res) => {
   try {
     const userId = req.user.id;
     const companyId = req.user.companyId;
@@ -394,7 +398,7 @@ FOR UPDATE
 // =======================
 // ▶️ END BREAK
 // =======================
-router.post('/break/end', authenticateToken, async (req, res) => {
+router.post('/break/end', authenticateToken, requireCompany, async (req, res) => {
   try {
     const userId = req.user.id;
     const companyId = req.user.companyId;
@@ -495,7 +499,7 @@ FOR UPDATE
 // =======================
 // 👤 ACTIVE SHIFT
 // =======================
-router.get('/active', authenticateToken, async (req, res) => {
+router.get('/active', authenticateToken, requireCompany, async (req, res) => {
   try {
     const result = await query(`
       SELECT *
@@ -522,7 +526,7 @@ router.get('/active', authenticateToken, async (req, res) => {
 // =======================
 // 👥 ACTIVE SHIFTS
 // =======================
-router.get('/active-all', authenticateToken, async (req, res) => {
+router.get('/active-all', authenticateToken, requireCompany, requireRole('manager'), async (req, res) => {
   try {
     const result = await query(`
       SELECT s.*, u.name
@@ -548,7 +552,7 @@ router.get('/active-all', authenticateToken, async (req, res) => {
 // =======================
 // 📜 HISTORY
 // =======================
-router.get('/history', authenticateToken, async (req, res) => {
+router.get('/history', authenticateToken, requireCompany, async (req, res) => {
   try {
     const result = await query(`
       SELECT *
@@ -574,7 +578,7 @@ router.get('/history', authenticateToken, async (req, res) => {
 // =======================
 // 📊 ANALYTICS
 // =======================
-router.get('/analytics', authenticateToken, async (req, res) => {
+router.get('/analytics', authenticateToken, requireCompany, requireRole('manager'), async (req, res) => {
   try {
     const result = await query(`
       SELECT
@@ -604,7 +608,7 @@ router.get('/analytics', authenticateToken, async (req, res) => {
 // =======================
 // 🔧 STATE
 // =======================
-router.get('/state', authenticateToken, async (req, res) => {
+router.get('/state', authenticateToken, requireCompany, async (req, res) => {
   try {
     const result = await query(`
       SELECT *

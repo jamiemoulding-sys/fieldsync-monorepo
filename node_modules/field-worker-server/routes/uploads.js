@@ -1,18 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../database/connection');
-const { authenticateToken } = require('../middleware/auth');
+const {
+  authenticateToken,
+  requireCompany,
+  requireRole,
+} = require('../middleware/auth');
 
 //
 // ✅ GET ALL COMPLETIONS
 //
-router.get('/all', authenticateToken, async (req, res) => {
+router.get('/all', authenticateToken, requireCompany, requireRole('manager'), async (req, res) => {
   try {
     const result = await query(`
-      SELECT *
-      FROM task_completions
-      ORDER BY completed_at DESC
-    `);
+      SELECT tc.*
+      FROM task_completions tc
+      JOIN tasks t ON t.id = tc.task_id
+      WHERE t.company_id = $1
+      ORDER BY tc.completed_at DESC
+    `, [req.user.companyId]);
 
     res.json(result.rows);
 

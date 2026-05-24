@@ -4,6 +4,8 @@ const router = express.Router();
 const { query } = require("../database/connection");
 const {
   authenticateToken,
+  requireCompany,
+  requireRole,
 } = require("../middleware/auth");
 
 //
@@ -14,6 +16,8 @@ const {
 router.get(
   "/",
   authenticateToken,
+  requireCompany,
+  requireRole("manager"),
   async (req, res) => {
     try {
       const companyId =

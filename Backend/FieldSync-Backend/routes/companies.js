@@ -2,30 +2,23 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { query } = require('../database/connection');
+const {
+  authenticateToken,
+  requireCompany,
+} = require('../middleware/auth');
 
 // 🔥 CONFIRM THIS FILE IS RUNNING
 console.log('🚀 NEW COMPANIES ROUTE ACTIVE');
 
 
 // 🏢 CREATE COMPANY
-router.post('/create-company', async (req, res) => {
+router.post('/create-company', authenticateToken, async (req, res) => {
   try {
     const { name } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Company name required' });
     }
-
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.split(' ')[1];
-
-    if (!token) {
-      return res.status(401).json({ error: 'No token provided' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    console.log('USER FROM TOKEN:', decoded);
 
     // 1. CREATE COMPANY
     const companyResult = await query(
@@ -43,7 +36,7 @@ router.post('/create-company', async (req, res) => {
        SET company_id = $1
        WHERE id = $2
        RETURNING *`,
-      [company.id, decoded.id]
+      [company.id, req.user.id]
     );
 
     const user = userResult.rows[0];
@@ -78,24 +71,11 @@ router.post('/create-company', async (req, res) => {
 
 
 // 🆕 GET CURRENT USER COMPANY
-router.get('/me', async (req, res) => {
+router.get('/me', authenticateToken, requireCompany, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.split(' ')[1];
-
-    if (!token) {
-      return res.status(401).json({ error: 'No token' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    if (!decoded.companyId) {
-      return res.status(404).json({ error: 'No company' });
-    }
-
     const result = await query(
       `SELECT * FROM companies WHERE id = $1`,
-      [decoded.companyId]
+      [req.user.companyId]
     );
 
     return res.json(result.rows[0]);

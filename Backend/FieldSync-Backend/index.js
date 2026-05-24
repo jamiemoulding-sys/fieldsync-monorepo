@@ -26,6 +26,7 @@ const performanceRoutes = require("./routes/performance");
 const dashboardRoutes = require("./routes/dashboard");
 const inviteRoutes = require("./routes/invite");
 const announcementRoutes = require("./routes/announcements");
+const trackingRoutes = require("./routes/tracking");
 
 const app = express();
 
@@ -247,6 +248,11 @@ app.use(
 app.use(
   "/api/announcements",
   announcementRoutes
+);
+
+app.use(
+  "/api/tracking",
+  trackingRoutes
 );
 
 /* =====================

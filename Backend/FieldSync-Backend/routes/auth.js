@@ -104,7 +104,7 @@ router.post(
       }
 
       const { error } =
-        await admin.auth.admin.deleteUser(
+        await supabase.auth.admin.deleteUser(
           userId
         );
 

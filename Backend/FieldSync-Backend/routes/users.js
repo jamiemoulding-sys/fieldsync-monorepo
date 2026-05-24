@@ -45,6 +45,7 @@ router.get(
 router.put(
   "/:id",
   authenticateToken,
+  requireCompany,
   requireRole("admin"),
   async (req, res) => {
     try {
@@ -124,6 +125,7 @@ const result = await query(
 router.put(
   "/:id/role",
   authenticateToken,
+  requireCompany,
   requireRole("admin"),
   async (req, res) => {
     try {
@@ -162,6 +164,7 @@ router.put(
 router.delete(
   "/:id",
   authenticateToken,
+  requireCompany,
   requireRole("admin"),
   async (req, res) => {
     try {

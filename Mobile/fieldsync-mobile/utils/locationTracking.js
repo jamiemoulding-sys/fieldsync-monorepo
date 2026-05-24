@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { supabase } from "./supabase";
+import API from "../services/api";
 
 const LOCATION_TASK = "background-location-task";
 const TRACKING_CONTEXT_KEY = "fieldsync_tracking_context";
@@ -30,14 +30,12 @@ async function clearTrackingContext() {
 
 async function sendLocationPing(coords) {
   const context = await getTrackingContext();
-  if (!context?.active || !context.shiftId || !context.userId || !context.companyId) {
+  if (!context?.active || !context.shiftId) {
     return;
   }
 
   const payload = {
     shift_id: context.shiftId,
-    user_id: context.userId,
-    company_id: context.companyId,
     latitude: coords.latitude,
     longitude: coords.longitude,
     speed: coords.speed || 0,
@@ -45,10 +43,10 @@ async function sendLocationPing(coords) {
     battery: 0,
   };
 
-  const { error } = await supabase.from("shift_route_logs").insert([payload]);
-
-  if (error) {
-    console.log("TRACKING PING ERROR:", error.message);
+  try {
+    await API.post("/tracking/pings", payload);
+  } catch (error) {
+    console.log("TRACKING PING ERROR:", error.response?.data?.error || error.message);
   }
 }
 

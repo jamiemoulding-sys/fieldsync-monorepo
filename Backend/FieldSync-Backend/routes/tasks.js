@@ -1,7 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../database/connection');
-const { authenticateToken } = require('../middleware/auth');
+const {
+  authenticateToken,
+  requireCompany,
+  requireRole,
+} = require('../middleware/auth');
 
 //
 // =======================
@@ -22,7 +26,7 @@ const logActivity = async (userId, companyId, action, metadata = {}) => {
 // =======================
 // ✅ GET TASKS (COMPANY SAFE)
 // =======================
-router.get('/all', authenticateToken, async (req, res) => {
+router.get('/all', authenticateToken, requireCompany, async (req, res) => {
   try {
     const userId = req.user.id;
     const companyId = req.user.companyId;
@@ -67,7 +71,7 @@ router.get('/all', authenticateToken, async (req, res) => {
 // =======================
 // ➕ CREATE TASK
 // =======================
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireCompany, requireRole('manager'), async (req, res) => {
   try {
     const { title, description, location_id } = req.body;
     const companyId = req.user.companyId;
@@ -116,7 +120,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // =======================
 // ✅ COMPLETE TASK
 // =======================
-router.post('/complete', authenticateToken, async (req, res) => {
+router.post('/complete', authenticateToken, requireCompany, async (req, res) => {
   try {
     const userId = req.user.id;
     const companyId = req.user.companyId;

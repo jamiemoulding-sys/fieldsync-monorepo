@@ -2,7 +2,11 @@ const express = require("express");
 const router = express.Router();
 
 const { query } = require("../database/connection");
-const { authenticateToken } = require("../middleware/auth");
+const {
+  authenticateToken,
+  requireCompany,
+  requireRole,
+} = require("../middleware/auth");
 
 /* ========================================
    🔒 SAFE ADMIN / MANAGER ACCESS
@@ -25,10 +29,8 @@ function allowReports(req, res) {
    📊 REPORT SUMMARY
    GET /api/reports
 ======================================== */
-router.get("/", authenticateToken, async (req, res) => {
+router.get("/", authenticateToken, requireCompany, requireRole("manager"), async (req, res) => {
   try {
-    if (!allowReports(req, res)) return;
-
     const companyId = req.user.companyId;
 
     const [
@@ -148,10 +150,10 @@ router.get("/", authenticateToken, async (req, res) => {
 router.get(
   "/timesheets",
   authenticateToken,
+  requireCompany,
+  requireRole("manager"),
   async (req, res) => {
     try {
-      if (!allowReports(req, res)) return;
-
       const companyId =
         req.user.companyId;
 

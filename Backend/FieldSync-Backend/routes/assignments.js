@@ -1,11 +1,15 @@
 const express = require('express');
 const router = express.Router();
 
-const { authenticateToken } = require('../middleware/auth');
+const {
+  authenticateToken,
+  requireCompany,
+  requireRole,
+} = require('../middleware/auth');
 
 // ✅ NO requireRole — removed completely
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, requireCompany, requireRole('manager'), async (req, res) => {
   try {
     res.json({ success: true, data: [] });
   } catch (err) {
@@ -13,7 +17,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireCompany, requireRole('manager'), async (req, res) => {
   try {
     res.json({ success: true, message: 'Assignment created' });
   } catch (err) {

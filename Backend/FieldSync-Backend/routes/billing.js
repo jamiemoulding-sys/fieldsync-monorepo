@@ -8,6 +8,8 @@ const stripe = new Stripe(
 
 const {
   authenticateToken,
+  requireCompany,
+  requireRole,
 } = require("../middleware/auth");
 
 const { query } = require(
@@ -144,6 +146,8 @@ async function getOrCreateCustomer(
 router.post(
   "/create-checkout-session",
   authenticateToken,
+  requireCompany,
+  requireRole("admin"),
   async (req, res) => {
     try {
       validateStripeConfig();
@@ -331,6 +335,8 @@ router.post(
 router.post(
   "/portal",
   authenticateToken,
+  requireCompany,
+  requireRole("admin"),
   async (req, res) => {
     try {
       validateStripeConfig();

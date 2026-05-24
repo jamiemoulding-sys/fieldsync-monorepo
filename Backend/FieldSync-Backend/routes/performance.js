@@ -2,12 +2,16 @@ const express = require("express");
 const router = express.Router();
 
 const { query } = require("../database/connection");
-const { authenticateToken } = require("../middleware/auth");
+const {
+  authenticateToken,
+  requireCompany,
+  requireRole,
+} = require("../middleware/auth");
 
 /* ===================================
    📊 FULL SAFE PERFORMANCE ROUTE
 =================================== */
-router.get("/", authenticateToken, async (req, res) => {
+router.get("/", authenticateToken, requireCompany, requireRole("manager"), async (req, res) => {
   try {
     const companyId = req.user.companyId;
 

@@ -4,6 +4,8 @@ const router = express.Router();
 const { query } = require("../database/connection");
 const {
   authenticateToken,
+  requireCompany,
+  requireRole,
 } = require("../middleware/auth");
 
 //
@@ -15,6 +17,7 @@ const {
 router.get(
   "/",
   authenticateToken,
+  requireCompany,
   async (req, res) => {
     try {
       const companyId =
@@ -70,20 +73,10 @@ router.get(
 router.post(
   "/",
   authenticateToken,
+  requireCompany,
+  requireRole("manager"),
   async (req, res) => {
     try {
-      if (
-        req.user.role !==
-          "admin" &&
-        req.user.role !==
-          "manager"
-      ) {
-        return res.status(403).json({
-          error:
-            "Forbidden",
-        });
-      }
-
       const {
         title,
         message,
@@ -149,20 +142,10 @@ router.post(
 router.delete(
   "/:id",
   authenticateToken,
+  requireCompany,
+  requireRole("manager"),
   async (req, res) => {
     try {
-      if (
-        req.user.role !==
-          "admin" &&
-        req.user.role !==
-          "manager"
-      ) {
-        return res.status(403).json({
-          error:
-            "Forbidden",
-        });
-      }
-
       await query(
         `
         DELETE FROM announcements

@@ -106,29 +106,43 @@ router.put('/:id',
   requireRole('manager', 'admin'),
   async (req, res) => {
     try {
-      const parsed = locationCreationSchema.safeParse(req.body);
+      const archivedOnly =
+        Object.keys(req.body).length === 1 &&
+        req.body.archived !== undefined;
 
-      if (!parsed.success) {
-        return validationFailed(res, parsed.error);
+      let name;
+      let address;
+      let latitude;
+      let longitude;
+      let radius;
+
+      if (!archivedOnly) {
+        const parsed = locationCreationSchema.safeParse(req.body);
+
+        if (!parsed.success) {
+          return validationFailed(res, parsed.error);
+        }
+
+        ({ name, address, latitude, longitude, radius } = parsed.data);
       }
-
-      const { name, address, latitude, longitude, radius } = parsed.data;
 
       const result = await query(
         `UPDATE locations
-         SET name=$1,
-             address=$2,
-             latitude=$3,
-             longitude=$4,
-             radius=$5
-         WHERE id=$6 AND company_id=$7
+         SET name=COALESCE($1, name),
+             address=COALESCE($2, address),
+             latitude=COALESCE($3, latitude),
+             longitude=COALESCE($4, longitude),
+             radius=COALESCE($5, radius),
+             archived=COALESCE($6, archived)
+         WHERE id=$7 AND company_id=$8
          RETURNING *`,
         [
-          name,
-          address || '',
+          name || null,
+          address === undefined ? null : address,
           latitude,
           longitude,
-          radius || 100,
+          radius,
+          typeof req.body.archived === 'boolean' ? req.body.archived : null,
           req.params.id,
           req.user.companyId
         ]

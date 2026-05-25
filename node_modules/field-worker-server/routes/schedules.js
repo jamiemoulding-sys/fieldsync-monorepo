@@ -45,6 +45,14 @@ function leaveValidationFailed(res, zodError) {
   });
 }
 
+function pickLeaveCreatePayload(body) {
+  const picked = {};
+  for (const key of ['start_date', 'end_date', 'user_id']) {
+    if (body[key] !== undefined) picked[key] = body[key];
+  }
+  return picked;
+}
+
 //
 // =======================
 // 📅 GET ALL SCHEDULES
@@ -84,8 +92,9 @@ router.get('/my-schedule',
         SELECT *
         FROM schedules
         WHERE user_id = $1
+        AND company_id = $2
         ORDER BY date DESC
-      `, [req.user.id]);
+      `, [req.user.id, req.user.companyId]);
 
       res.json(result.rows);
 
@@ -114,7 +123,7 @@ router.post('/',
         return validationFailed(res, parsed.error);
       }
 
-      const { user_id, date, start_time, end_time } = parsed.data;
+      const { user_id, date, start_time, end_time, location_id } = parsed.data;
 
       // 🔒 validate user belongs to company
       const userCheck = await query(
@@ -141,11 +150,24 @@ router.post('/',
         });
       }
 
+      if (location_id) {
+        const locationCheck = await query(
+          `SELECT id FROM locations WHERE id = $1 AND company_id = $2`,
+          [location_id, req.user.companyId]
+        );
+
+        if (locationCheck.rows.length === 0) {
+          return res.status(403).json({
+            error: 'Invalid location for this company'
+          });
+        }
+      }
+
       const result = await query(`
-        INSERT INTO schedules (user_id, date, start_time, end_time, company_id)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO schedules (user_id, date, start_time, end_time, company_id, location_id)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *
-      `, [user_id, date, start_time, end_time, req.user.companyId]);
+      `, [user_id, date, start_time, end_time, req.user.companyId, location_id || null]);
 
       // 🧠 ACTIVITY LOG
       await query(
@@ -201,27 +223,44 @@ router.post('/bulk',
           return validationFailed(res, parsed.error, i);
         }
 
-        const { user_id, date, start_time, end_time } = parsed.data;
+        const { user_id, date, start_time, end_time, location_id } = parsed.data;
 
         // prevent duplicates
         const exists = await query(
-          `SELECT id FROM schedules WHERE user_id=$1 AND date=$2`,
-          [user_id, date]
+          `SELECT id FROM schedules WHERE user_id=$1 AND date=$2 AND company_id=$3`,
+          [user_id, date, req.user.companyId]
         );
 
         if (exists.rows.length > 0) continue;
 
+        const userCheck = await query(
+          `SELECT id FROM users WHERE id = $1 AND company_id = $2`,
+          [user_id, req.user.companyId]
+        );
+
+        if (userCheck.rows.length === 0) continue;
+
+        if (location_id) {
+          const locationCheck = await query(
+            `SELECT id FROM locations WHERE id = $1 AND company_id = $2`,
+            [location_id, req.user.companyId]
+          );
+
+          if (locationCheck.rows.length === 0) continue;
+        }
+
         const result = await query(
           `INSERT INTO schedules
-           (user_id, date, start_time, end_time, company_id)
-           VALUES ($1,$2,$3,$4,$5)
+           (user_id, date, start_time, end_time, company_id, location_id)
+           VALUES ($1,$2,$3,$4,$5,$6)
            RETURNING *`,
           [
             user_id,
             date,
             start_time,
             end_time,
-            req.user.companyId
+            req.user.companyId,
+            location_id || null
           ]
         );
 
@@ -250,18 +289,50 @@ router.put('/:id',
   requireRole('admin', 'manager'),
   async (req, res) => {
     try {
-      const { start_time, end_time } = req.body;
+      const { user_id, date, start_time, end_time, location_id } = req.body;
+
+      if (user_id) {
+        const userCheck = await query(
+          `SELECT id FROM users WHERE id = $1 AND company_id = $2`,
+          [user_id, req.user.companyId]
+        );
+
+        if (userCheck.rows.length === 0) {
+          return res.status(403).json({
+            error: 'Invalid user for this company'
+          });
+        }
+      }
+
+      if (location_id) {
+        const locationCheck = await query(
+          `SELECT id FROM locations WHERE id = $1 AND company_id = $2`,
+          [location_id, req.user.companyId]
+        );
+
+        if (locationCheck.rows.length === 0) {
+          return res.status(403).json({
+            error: 'Invalid location for this company'
+          });
+        }
+      }
 
       const result = await query(`
         UPDATE schedules
-        SET start_time = $1,
-            end_time = $2
-        WHERE id = $3
-        AND company_id = $4
+        SET user_id = COALESCE($1, user_id),
+            date = COALESCE($2, date),
+            start_time = COALESCE($3, start_time),
+            end_time = COALESCE($4, end_time),
+            location_id = COALESCE($5, location_id)
+        WHERE id = $6
+        AND company_id = $7
         RETURNING *
       `, [
+        user_id,
+        date,
         start_time,
         end_time,
+        location_id,
         req.params.id,
         req.user.companyId
       ]);
@@ -354,23 +425,40 @@ router.post('/holiday-requests',
   requireCompany,
   async (req, res) => {
     try {
-      const parsed = leaveRequestCreateSchema.safeParse(req.body);
+      const parsed = leaveRequestCreateSchema.safeParse(
+        pickLeaveCreatePayload(req.body)
+      );
 
       if (!parsed.success) {
         return leaveValidationFailed(res, parsed.error);
       }
 
       const { start_date, end_date, user_id } = parsed.data;
+      const requestedStatus = req.body.status;
 
-      // Use authenticated user's ID unless admin specifies override
-      const targetUserId = user_id || req.user.id;
+      const canManage = req.user.role === 'manager' || req.user.role === 'admin';
+      const targetUserId = canManage && user_id ? user_id : req.user.id;
+      const status = canManage && ['pending', 'approved', 'rejected'].includes(requestedStatus)
+        ? requestedStatus
+        : 'pending';
+
+      const userCheck = await query(
+        `SELECT id FROM users WHERE id = $1 AND company_id = $2`,
+        [targetUserId, req.user.companyId]
+      );
+
+      if (userCheck.rows.length === 0) {
+        return res.status(403).json({
+          error: 'Invalid user for this company'
+        });
+      }
 
       const result = await query(`
         INSERT INTO holidays 
         (user_id, start_date, end_date, status, company_id)
-        VALUES ($1, $2, $3, 'pending', $4)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING *
-      `, [targetUserId, start_date, end_date, req.user.companyId]);
+      `, [targetUserId, start_date, end_date, status, req.user.companyId]);
 
       res.status(201).json(result.rows[0]);
 
@@ -415,10 +503,19 @@ router.put('/holiday-requests/:id',
 
       const result = await query(`
         UPDATE holidays
-        SET status = $1
-        WHERE id = $2 AND company_id = $3
+        SET status = $1,
+            reason = COALESCE($2, reason),
+            approved_by = CASE WHEN $1 = 'approved' THEN $3 ELSE approved_by END,
+            approved_at = CASE WHEN $1 = 'approved' THEN NOW() ELSE approved_at END
+        WHERE id = $4 AND company_id = $5
         RETURNING *
-      `, [status, req.params.id, req.user.companyId]);
+      `, [
+        status,
+        req.body.reason || null,
+        req.user.id,
+        req.params.id,
+        req.user.companyId,
+      ]);
 
       if (!result.rows[0]) {
         return res.status(404).json({
@@ -439,6 +536,7 @@ router.put('/holiday-requests/:id',
 router.delete('/holiday-requests/:id',
   authenticateToken,
   requireCompany,
+  requireRole('admin', 'manager'),
   async (req, res) => {
     try {
       await query(

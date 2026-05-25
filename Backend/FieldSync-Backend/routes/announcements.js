@@ -103,10 +103,9 @@ router.post(
             title,
             message,
             priority,
-            created_by,
             expires_at
           )
-          VALUES ($1,$2,$3,$4,$5,$6)
+          VALUES ($1,$2,$3,$4,$5)
           RETURNING *
           `,
           [
@@ -115,7 +114,6 @@ router.post(
             message,
             priority ||
               "normal",
-            req.user.id,
             expiresAt ||
               null,
           ]
@@ -133,6 +131,71 @@ router.post(
       return res.status(500).json({
         error:
           "Failed to create announcement",
+      });
+    }
+  }
+);
+
+// UPDATE
+router.put(
+  "/:id",
+  authenticateToken,
+  requireCompany,
+  requireRole("manager"),
+  async (req, res) => {
+    try {
+      const {
+        title,
+        message,
+        priority,
+        expiresAt,
+        expires_at,
+      } = req.body;
+
+      const result =
+        await query(
+          `
+          UPDATE announcements
+          SET
+            title = COALESCE($1, title),
+            message = COALESCE($2, message),
+            priority = COALESCE($3, priority),
+            expires_at = COALESCE($4, expires_at)
+          WHERE id = $5
+          AND company_id = $6
+          RETURNING *
+          `,
+          [
+            title,
+            message,
+            priority,
+            expiresAt ||
+              expires_at ||
+              null,
+            req.params.id,
+            req.user.companyId,
+          ]
+        );
+
+      if (!result.rows[0]) {
+        return res.status(404).json({
+          error:
+            "Announcement not found",
+        });
+      }
+
+      return res.json(
+        result.rows[0]
+      );
+    } catch (error) {
+      console.error(
+        "ANNOUNCEMENTS UPDATE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          "Failed to update announcement",
       });
     }
   }

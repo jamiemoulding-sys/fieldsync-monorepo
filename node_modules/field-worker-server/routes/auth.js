@@ -473,6 +473,7 @@ router.put(
         phone,
         companyName,
         jobTitle,
+        job_title,
       } = req.body;
 
       await query(
@@ -487,25 +488,21 @@ router.put(
         [
           name || "",
           phone || "",
-          jobTitle || "",
+          jobTitle || job_title || "",
           req.user.id,
         ]
       );
 
-      if (companyName) {
+      if (companyName && req.user.companyId) {
         await query(
           `
           UPDATE companies
           SET name = $1
-          WHERE id = (
-            SELECT company_id
-            FROM users
-            WHERE id = $2
-          )
+          WHERE id = $2
           `,
           [
             companyName,
-            req.user.id,
+            req.user.companyId,
           ]
         );
       }

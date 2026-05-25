@@ -28,6 +28,7 @@ const inviteRoutes = require("./routes/invite");
 const announcementRoutes = require("./routes/announcements");
 const trackingRoutes = require("./routes/tracking");
 const payslipRoutes = require("./routes/payslips");
+const notificationRoutes = require("./routes/notifications");
 
 const app = express();
 
@@ -115,6 +116,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/announcements", announcementRoutes);
 app.use("/api/tracking", trackingRoutes);
 app.use("/api/payslips", payslipRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.get("/", (req, res) => {
   res.send("Zorvia API Running");

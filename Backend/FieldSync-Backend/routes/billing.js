@@ -444,6 +444,66 @@ router.post(
   }
 );
 
+router.post(
+  "/set-plan",
+  authenticateToken,
+  requireCompany,
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const allowedPlans = new Set(["starter", "pro", "business", "trial", "free"]);
+      const plan = String(req.body.plan || "").toLowerCase();
+
+      if (!allowedPlans.has(plan)) {
+        return res.status(400).json({ error: "Invalid plan" });
+      }
+
+      const result = await query(
+        `
+        UPDATE companies
+        SET current_plan = $1,
+            subscription_status = 'active',
+            is_pro = $2
+        WHERE id = $3
+        RETURNING id, current_plan, subscription_status, is_pro
+        `,
+        [plan, plan !== "starter" && plan !== "free", req.user.companyId]
+      );
+
+      return res.json({ success: true, company: result.rows[0] });
+    } catch (err) {
+      console.error("SET PLAN ERROR:", err.message);
+      return res.status(500).json({ error: "Failed to update billing plan" });
+    }
+  }
+);
+
+router.post(
+  "/cancel-plan",
+  authenticateToken,
+  requireCompany,
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const result = await query(
+        `
+        UPDATE companies
+        SET subscription_status = 'inactive',
+            is_pro = false
+        WHERE id = $1
+        RETURNING id, current_plan, subscription_status, is_pro
+        `,
+        [req.user.companyId]
+      );
+
+      return res.json({ success: true, company: result.rows[0] });
+    } catch (err) {
+      console.error("CANCEL PLAN ERROR:", err.message);
+      return res.status(500).json({ error: "Failed to cancel billing plan" });
+    }
+  }
+);
+
 /* ==========================================
    WEBHOOK
 ========================================== */

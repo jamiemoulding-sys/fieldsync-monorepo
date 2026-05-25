@@ -276,6 +276,7 @@ router.post('/clock-out', authenticateToken, requireCompany, async (req, res) =>
       RETURNING *
     `;
 
+    updateQuery = updateQuery.replace('AND id = $3', `AND id = $${paramIndex}`);
     queryParams.push(activeShift.id);
     const result = await query(updateQuery, queryParams);
 
@@ -545,6 +546,133 @@ router.get('/active-all', authenticateToken, requireCompany, requireRole('manage
       error: "REAL_ERROR",
       message: error.message
     });
+  }
+});
+
+router.post('/:id/manager-clock-out', authenticateToken, requireCompany, requireRole('manager', 'admin'), async (req, res) => {
+  try {
+    const shiftId = Number(req.params.id);
+    const customTime = req.body?.custom_time || req.body?.clock_out_time || null;
+
+    if (!Number.isInteger(shiftId) || shiftId <= 0) {
+      return res.status(400).json({ error: 'Valid shift id required' });
+    }
+
+    const shiftRes = await query(
+      `
+      SELECT *
+      FROM shifts
+      WHERE id = $1
+      AND company_id = $2
+      LIMIT 1
+      `,
+      [shiftId, req.user.companyId]
+    );
+
+    const shift = shiftRes.rows[0];
+    if (!shift) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+
+    const clockOutTime = customTime ? new Date(customTime) : new Date();
+    if (Number.isNaN(clockOutTime.getTime())) {
+      return res.status(400).json({ error: 'Invalid clock out time' });
+    }
+
+    const totalHours = Math.max(
+      (clockOutTime.getTime() - new Date(shift.clock_in_time).getTime()) / 3600000 -
+        Number(shift.total_break_seconds || 0) / 3600,
+      0
+    );
+
+    const result = await query(
+      `
+      UPDATE shifts
+      SET clock_out_time = $1,
+          total_hours = $2
+      WHERE id = $3
+      AND company_id = $4
+      RETURNING *
+      `,
+      [clockOutTime.toISOString(), totalHours, shiftId, req.user.companyId]
+    );
+
+    await logActivity(req.user.id, req.user.companyId, 'manager_clock_out', {
+      shift_id: shiftId,
+      employee_id: shift.user_id,
+    });
+
+    return res.json({ success: true, shift: result.rows[0] });
+  } catch (error) {
+    console.error('MANAGER CLOCK OUT ERROR:', error.message);
+    return res.status(500).json({ error: 'Manager clock out failed' });
+  }
+});
+
+router.post('/:id/job/check-in', authenticateToken, requireCompany, async (req, res) => {
+  try {
+    const shiftId = Number(req.params.id);
+    const locationId = req.body?.location_id || req.body?.active_job_id;
+
+    if (!Number.isInteger(shiftId) || shiftId <= 0 || !locationId) {
+      return res.status(400).json({ error: 'Valid shift and location required' });
+    }
+
+    const result = await query(
+      `
+      UPDATE shifts
+      SET active_job_id = $1,
+          arrived_at = NOW()
+      WHERE id = $2
+      AND user_id = $3
+      AND company_id = $4
+      AND clock_out_time IS NULL
+      RETURNING *
+      `,
+      [locationId, shiftId, req.user.id, req.user.companyId]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: 'Active shift not found' });
+    }
+
+    return res.json({ success: true, shift: result.rows[0] });
+  } catch (error) {
+    console.error('JOB CHECK-IN ERROR:', error.message);
+    return res.status(500).json({ error: 'Job check-in failed' });
+  }
+});
+
+router.post('/:id/job/leave', authenticateToken, requireCompany, async (req, res) => {
+  try {
+    const shiftId = Number(req.params.id);
+
+    if (!Number.isInteger(shiftId) || shiftId <= 0) {
+      return res.status(400).json({ error: 'Valid shift id required' });
+    }
+
+    const result = await query(
+      `
+      UPDATE shifts
+      SET active_job_id = NULL,
+          left_job_at = NOW()
+      WHERE id = $1
+      AND user_id = $2
+      AND company_id = $3
+      AND clock_out_time IS NULL
+      RETURNING *
+      `,
+      [shiftId, req.user.id, req.user.companyId]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: 'Active shift not found' });
+    }
+
+    return res.json({ success: true, shift: result.rows[0] });
+  } catch (error) {
+    console.error('JOB LEAVE ERROR:', error.message);
+    return res.status(500).json({ error: 'Job leave failed' });
   }
 });
 

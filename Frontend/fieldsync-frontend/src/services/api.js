@@ -74,18 +74,6 @@ function nowISO() {
   return new Date().toISOString();
 }
 
-function calcSafeHours(start, end, breakSecs = 0) {
-  if (!start || !end) return 0;
-
-  const diff =
-    (new Date(end).getTime() -
-      new Date(start).getTime()) /
-      3600000 -
-    Number(breakSecs || 0) / 3600;
-
-  return Math.max(diff, 0);
-}
-
 /* =====================================================
 AUTH
 ===================================================== */
@@ -662,32 +650,14 @@ async clockIn(
   ONLINE SAVE
   ===================================== */
 
-  const { error } =
-    await supabase
-      .from("shifts")
-      .insert({
-        ...payload,
+  const res = await api.post("/shifts/clock-in", {
+    ...payload,
+    location_id: locationId,
+    latitude: lat,
+    longitude: lng,
+  });
 
-        user_id: user.id,
-        company_id:
-          user.company_id,
-
-        location_id:
-          locationId,
-
-        clock_in_time:
-          nowISO(),
-
-        latitude: lat,
-        longitude: lng,
-
-        clock_in_lat: lat,
-        clock_in_lng: lng,
-      });
-
-  if (error) throw error;
-
-  return true;
+  return res.data?.shift || res.data || true;
 },
 
   /* =========================================
@@ -733,15 +703,6 @@ async clockOut(sync = false) {
     await shiftAPI.getActive();
 
   if (!active) return true;
-
-  const end = nowISO();
-
-  const hours =
-    calcSafeHours(
-      active.clock_in_time,
-      end,
-      active.total_break_seconds
-    );
 
   /* =====================================
   GET FINAL GPS POSITION
@@ -789,10 +750,8 @@ async clockOut(sync = false) {
     // Use backend clock-out API with GPS coordinates
     const requestBody = {};
     if (lat !== null && lng !== null) {
-      requestBody.location = {
-        latitude: lat,
-        longitude: lng
-      };
+      requestBody.clock_out_lat = lat;
+      requestBody.clock_out_lng = lng;
     }
 
     const response = await api.post('/shifts/clock-out', requestBody);
@@ -801,49 +760,12 @@ async clockOut(sync = false) {
       throw new Error(response.data.error || 'Clock out failed');
     }
 
-    // Preserve client-side total_hours calculation temporarily
-    const { error } = await supabase
-      .from("shifts")
-      .update({
-        total_hours: hours,
-        clock_out_lat: lat,
-        clock_out_lng: lng,
-        latitude: lat,
-        longitude: lng,
-      })
-      .eq("id", active.id);
-
-    if (error) throw error;
-
+    shiftAPI.clearOfflineShift();
+    window.dispatchEvent(new Event("shiftUpdated"));
+    return true;
   } catch (backendError) {
-    console.error('Backend clock-out failed, falling back to direct Supabase:', backendError);
-    
-    // Fallback to direct Supabase write for backward compatibility
-    const { error } =
-      await supabase
-        .from("shifts")
-        .update({
-          clock_out_time: end,
-          total_hours: hours,
-          clock_out_lat: lat,
-          clock_out_lng: lng,
-          latitude: lat,
-          longitude: lng,
-        })
-        .eq("id", active.id);
-
-    if (error) throw error;
+    throw backendError;
   }
-
-  shiftAPI.clearOfflineShift();
-
-  window.dispatchEvent(
-    new Event(
-      "shiftUpdated"
-    )
-  );
-
-  return true;
 },
 
   /* =========================================
@@ -871,31 +793,15 @@ async clockOut(sync = false) {
 
     if (!active) return true;
 
-    try {
-      // Use backend break API
-      const response = await api.post('/shifts/break/start', {
-        shift_id: active.id
-      });
+    const response = await api.post('/shifts/break/start', {
+      shift_id: active.id
+    });
 
-      if (!response.data.success) {
-        throw new Error(response.data.error || 'Break start failed');
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Backend break start failed, falling back to direct Supabase:', error);
-      
-      // Fallback to direct Supabase write for backward compatibility
-      await supabase
-        .from("shifts")
-        .update({
-          break_started_at:
-            nowISO(),
-        })
-        .eq("id", active.id);
-
-      return true;
+    if (!response.data.success) {
+      throw new Error(response.data.error || 'Break start failed');
     }
+
+    return true;
   },
 
   async endBreak(sync = false) {
@@ -921,46 +827,15 @@ async clockOut(sync = false) {
     )
       return true;
 
-    try {
-      // Use backend break API
-      const response = await api.post('/shifts/break/end', {
-        shift_id: active.id
-      });
+    const response = await api.post('/shifts/break/end', {
+      shift_id: active.id
+    });
 
-      if (!response.data.success) {
-        throw new Error(response.data.error || 'Break end failed');
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Backend break end failed, falling back to direct Supabase:', error);
-      
-      // Fallback to direct Supabase write for backward compatibility
-      const secs =
-        Math.floor(
-          (Date.now() -
-            new Date(
-              active.break_started_at
-            ).getTime()) /
-            1000
-        );
-
-      const current =
-        active.total_break_seconds ||
-        0;
-
-      await supabase
-        .from("shifts")
-        .update({
-          break_started_at:
-            null,
-          total_break_seconds:
-            current + secs,
-        })
-        .eq("id", active.id);
-
-      return true;
+    if (!response.data.success) {
+      throw new Error(response.data.error || 'Break end failed');
     }
+
+    return true;
   },
 
  /* =========================================
@@ -986,33 +861,11 @@ async updateLiveLocation(
     return true;
   }
 
-  try {
-    /* update live location */
-    await supabase
-      .from("shifts")
-      .update({
-        latitude: lat,
-        longitude: lng,
-      })
-      .eq("id", shiftId);
-
-    /* save route point */
-    await supabase
-      .from("shift_routes")
-      .insert({
-        shift_id: shiftId,
-        latitude: lat,
-        longitude: lng,
-        created_at:
-          new Date().toISOString(),
-      });
-
-  } catch (err) {
-    console.error(
-      "GPS save failed:",
-      err
-    );
-  }
+  await api.post("/tracking/pings", {
+    shift_id: shiftId,
+    latitude: lat,
+    longitude: lng,
+  });
 
   return true;
 },
@@ -1025,70 +878,31 @@ async updateLiveLocation(
     shiftId,
     customTime = null
   ) {
-    const {
-      data,
-      error,
-    } = await supabase
-      .from("shifts")
-      .select("*")
-      .eq("id", shiftId)
-      .single();
-
-    if (error) throw error;
-
     const end =
       customTime ||
       nowISO();
 
-    const total =
-      calcSafeHours(
-        data.clock_in_time,
-        end,
-        data.total_break_seconds
-      );
+    const res = await api.post(`/shifts/${shiftId}/manager-clock-out`, {
+      custom_time: end,
+    });
 
-    await supabase
-      .from("shifts")
-      .update({
-        clock_out_time:
-          end,
-        total_hours:
-          total,
-      })
-      .eq("id", shiftId);
-
-    return true;
+    return res.data;
   },
 
   async checkIntoJob(
     shiftId,
     locationId
   ) {
-    await supabase
-      .from("shifts")
-      .update({
-        active_job_id:
-          locationId,
-        arrived_at:
-          nowISO(),
-      })
-      .eq("id", shiftId);
+    const res = await api.post(`/shifts/${shiftId}/job/check-in`, {
+      location_id: locationId,
+    });
 
-    return true;
+    return res.data;
   },
 
   async leaveJob(shiftId) {
-    await supabase
-      .from("shifts")
-      .update({
-        active_job_id:
-          null,
-        left_job_at:
-          nowISO(),
-      })
-      .eq("id", shiftId);
-
-    return true;
+    const res = await api.post(`/shifts/${shiftId}/job/leave`);
+    return res.data;
   },
 };
 
@@ -1098,99 +912,39 @@ NOTIFICATIONS
 
 export const notificationAPI = {
   getAll: async () => {
-    const user = await getCurrentUser();
-
-    const { data, error } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("company_id", user.company_id)
-      .order("created_at", {
-        ascending: false,
-      });
-
-    if (error) throw error;
-
-    return data || [];
+    const res = await api.get("/notifications");
+    return res.data || [];
   },
 
   getUnread: async () => {
-    const user = await getCurrentUser();
-
-    const { data, error } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("read", false);
-
-    if (error) throw error;
-
-    return data?.length || 0;
+    const res = await api.get("/notifications/unread-count");
+    return res.data?.count || 0;
   },
 
 
   markRead: async (id) => {
-    const { error } = await supabase
-      .from("notifications")
-      .update({ read: true })
-      .eq("id", id);
-
-    if (error) throw error;
-
-    return true;
+    const res = await api.put(`/notifications/${id}/read`);
+    return res.data;
   },
 
   markAllRead: async () => {
-    const user = await getCurrentUser();
-
-    const { error } = await supabase
-      .from("notifications")
-      .update({ read: true })
-      .eq("user_id", user.id)
-      .eq("read", false);
-
-    if (error) throw error;
-
-    return true;
+    const res = await api.put("/notifications/read-all");
+    return res.data;
   },
 
   create: async (payload) => {
-    const { error } = await supabase
-      .from("notifications")
-      .insert(payload);
-
-    if (error) throw error;
-
-    return true;
+    const res = await api.post("/notifications", payload);
+    return res.data;
   },
 
   clearAll: async () => {
-  const user = await getCurrentUser();
-
-  const { error } = await supabase
-    .from("notifications")
-    .delete()
-    .eq("user_id", user.id)
-    .eq("company_id", user.company_id);
-
-  if (error) throw error;
-
-  return true;
+  const res = await api.delete("/notifications");
+  return res.data;
 },
 
 delete: async (id) => {
-  const user = await getCurrentUser();
-
-  const { error } = await supabase
-    .from("notifications")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .eq("company_id", user.company_id);
-
-  if (error) throw error;
-
-  return true;
+  const res = await api.delete(`/notifications/${id}`);
+  return res.data;
 },
 
 };
@@ -1545,36 +1299,13 @@ export const billingAPI = {
 },
 
   setPlan: async (plan) => {
-  const companyId = await getCompanyId();
-
-  const { error } = await supabase
-    .from("companies")
-    .update({
-      current_plan: plan,
-      subscription_status: "active",
-      is_pro: true,
-    })
-    .eq("id", companyId);
-
-  if (error) throw error;
-
-  return true;
+  const res = await api.post("/billing/set-plan", { plan });
+  return res.data;
 },
 
 cancel: async () => {
-  const companyId = await getCompanyId();
-
-  const { error } = await supabase
-    .from("companies")
-    .update({
-      subscription_status: "inactive",
-      is_pro: false,
-    })
-    .eq("id", companyId);
-
-
-  if (error) throw error;
-  return true;
+  const res = await api.post("/billing/cancel-plan");
+  return res.data;
 },
 
   getStatus: async () => {

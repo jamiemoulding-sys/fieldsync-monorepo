@@ -1,12 +1,11 @@
-import { supabase } from "./supabase";
-import { getCurrentUser } from "./session";
+import { scheduleAPI } from "../services/api";
+
+export async function getSchedule(params = {}) {
+  return await scheduleAPI.getMine(params);
+}
 
 export async function getTodayShift() {
   try {
-    const user = await getCurrentUser();
-    if (!user) return null;
-
-    // 🔥 SAFE DATE RANGE (no timezone bugs)
     const now = new Date();
 
     const start = new Date(now);
@@ -15,48 +14,24 @@ export async function getTodayShift() {
     const end = new Date(now);
     end.setHours(23, 59, 59, 999);
 
-    // 🔥 1. GET SHIFTS (NO .single())
-    const { data: shifts, error } = await supabase
-      .from("schedules")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("company_id", user.company_id)
-      .gte("start_time", start.toISOString())
-      .lte("start_time", end.toISOString())
-      .order("start_time", { ascending: true });
-
-    if (error) {
-      console.log("SCHEDULE ERROR:", error);
-      return null;
-    }
+    const shifts = await getSchedule({
+      from: start.toISOString(),
+      to: end.toISOString(),
+      limit: 1,
+    });
 
     if (!shifts || shifts.length === 0) return null;
 
-    // 🔥 pick first shift of the day
     const shift = shifts[0];
 
-    // 🔥 2. GET LOCATION
-    const { data: location } = await supabase
-      .from("locations")
-      .select("*")
-      .eq("id", shift.location_id)
-      .single();
-
-    // 🔥 3. GET TASKS
-    const { data: tasks } = await supabase
-      .from("tasks")
-      .select("*")
-      .eq("shift_id", shift.id);
-
-    // 🔥 FINAL CLEAN OBJECT
     return {
       ...shift,
-      locations: location || null,
-      tasks: tasks || [],
+      locations: shift.locations || shift.location || null,
+      location: shift.location || shift.locations || null,
+      tasks: shift.tasks || [],
     };
-
   } catch (err) {
-    console.log("GET TODAY SHIFT ERROR:", err);
+    console.log("GET TODAY SHIFT ERROR:", err.userMessage || err.message);
     return null;
   }
 }

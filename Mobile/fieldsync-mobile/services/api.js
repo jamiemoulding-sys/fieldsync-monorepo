@@ -81,3 +81,24 @@ export const payslipAPI = {
     return response.data;
   },
 };
+
+export const dashboardAPI = {
+  getMobile: async () => {
+    const response = await API.get("/dashboard/mobile");
+    return response.data;
+  },
+};
+
+export const scheduleAPI = {
+  getMine: async (params = {}) => {
+    const response = await API.get("/schedules/my-schedule", { params });
+    return response.data || [];
+  },
+};
+
+export const shiftAPI = {
+  getHistory: async (params = {}) => {
+    const response = await API.get("/shifts/history", { params });
+    return response.data || [];
+  },
+};

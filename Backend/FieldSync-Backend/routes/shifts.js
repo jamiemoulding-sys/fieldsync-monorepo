@@ -554,14 +554,42 @@ router.get('/active-all', authenticateToken, requireCompany, requireRole('manage
 // =======================
 router.get('/history', authenticateToken, requireCompany, async (req, res) => {
   try {
+    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    const params = [req.user.id, req.user.companyId];
+    const filters = [];
+
+    if (req.query.from) {
+      params.push(req.query.from);
+      filters.push(`s.clock_in_time >= $${params.length}`);
+    }
+
+    if (req.query.before) {
+      params.push(req.query.before);
+      filters.push(`s.clock_in_time < $${params.length}`);
+    }
+
+    params.push(limit);
+
     const result = await query(`
-      SELECT *
-      FROM shifts
-      WHERE user_id = $1
-      AND company_id = $2
-      ORDER BY clock_in_time DESC
-      LIMIT 20
-    `, [req.user.id, req.user.companyId]);
+      SELECT
+        s.*,
+        CASE
+          WHEN l.id IS NULL THEN NULL
+          ELSE json_build_object(
+            'id', l.id,
+            'name', l.name
+          )
+        END AS locations
+      FROM shifts s
+      LEFT JOIN locations l
+        ON l.id = s.location_id
+        AND l.company_id = s.company_id
+      WHERE s.user_id = $1
+      AND s.company_id = $2
+      ${filters.length ? `AND ${filters.join(' AND ')}` : ''}
+      ORDER BY s.clock_in_time DESC
+      LIMIT $${params.length}
+    `, params);
 
     return res.json(result.rows);
 

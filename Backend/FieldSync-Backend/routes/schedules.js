@@ -88,13 +88,46 @@ router.get('/my-schedule',
   requireCompany,
   async (req, res) => {
     try {
+      const params = [req.user.id, req.user.companyId];
+      const filters = [];
+      const limit = Math.min(Number(req.query.limit) || 100, 200);
+
+      if (req.query.from) {
+        params.push(req.query.from);
+        filters.push(`s.start_time >= $${params.length}`);
+      }
+
+      if (req.query.to) {
+        params.push(req.query.to);
+        filters.push(`s.start_time < $${params.length}`);
+      }
+
+      params.push(limit);
+
       const result = await query(`
-        SELECT *
-        FROM schedules
-        WHERE user_id = $1
-        AND company_id = $2
-        ORDER BY date DESC
-      `, [req.user.id, req.user.companyId]);
+        SELECT
+          s.*,
+          CASE
+            WHEN l.id IS NULL THEN NULL
+            ELSE json_build_object(
+              'id', l.id,
+              'name', l.name,
+              'address', l.address,
+              'latitude', l.latitude,
+              'longitude', l.longitude,
+              'radius', l.radius
+            )
+          END AS locations
+        FROM schedules s
+        LEFT JOIN locations l
+          ON l.id = s.location_id
+          AND l.company_id = s.company_id
+        WHERE s.user_id = $1
+        AND s.company_id = $2
+        ${filters.length ? `AND ${filters.join(' AND ')}` : ''}
+        ORDER BY s.start_time ASC, s.date ASC
+        LIMIT $${params.length}
+      `, params);
 
       res.json(result.rows);
 

@@ -13,8 +13,7 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { getCurrentUser } from "../../utils/session";
-import { supabase } from "../../utils/supabase";
+import { getSchedule } from "../../utils/schedule";
 
 const todayKey = new Date().toISOString().slice(0, 10);
 
@@ -131,34 +130,11 @@ export default function Schedule() {
 
       setError("");
 
-      const user = await getCurrentUser();
-      if (!user) {
-        setShifts([]);
-        setError("No active session. Please sign in again.");
-        return;
-      }
-
-      const { data: schedules, error: scheduleError } = await supabase
-        .from("schedules")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("company_id", user.company_id)
-        .order("start_time", { ascending: true });
-
-      if (scheduleError) throw scheduleError;
-
-      const { data: locations, error: locationError } = await supabase
-        .from("locations")
-        .select("*")
-        .eq("company_id", user.company_id);
-
-      if (locationError) throw locationError;
+      const schedules = await getSchedule();
 
       const merged = (schedules || []).map((shift) => ({
         ...shift,
-        location:
-          (locations || []).find((location) => location.id === shift.location_id) ||
-          null,
+        location: shift.location || shift.locations || null,
       }));
 
       setShifts(merged);

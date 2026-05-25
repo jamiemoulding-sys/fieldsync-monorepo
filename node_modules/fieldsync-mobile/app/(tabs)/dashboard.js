@@ -11,36 +11,10 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import API from "../../services/api";
-import { getCurrentUser } from "../../utils/session";
-import { getTodayShift } from "../../utils/schedule";
-import { getShifts } from "../../utils/shifts";
-import { getActiveShift } from "../../utils/shiftsStorage";
-import { supabase } from "../../utils/supabase";
-
-const WEEK_START_DAY = 1;
+import { dashboardAPI } from "../../services/api";
 
 const coalesce = (...values) =>
   values.find((value) => value !== undefined && value !== null && value !== "");
-
-const atStartOfDay = (date) => {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-};
-
-const addDays = (date, days) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-};
-
-const getWeekStart = (date = new Date(), weekStartDay = WEEK_START_DAY) => {
-  const start = atStartOfDay(date);
-  const diff = (start.getDay() - weekStartDay + 7) % 7;
-  start.setDate(start.getDate() - diff);
-  return start;
-};
 
 const getShiftStart = (shift) => shift?.clock_in_time || shift?.start_time || shift?.date;
 const getShiftEnd = (shift) => shift?.clock_out_time || shift?.end_time || shift?.finish_time;
@@ -98,126 +72,6 @@ const getShiftSeconds = (shift) => {
   return diff / 1000;
 };
 
-const getHolidayAllowance = (profile) =>
-  Number(
-    profile?.holiday_allowance ??
-      profile?.holiday_days ??
-      profile?.annual_leave ??
-      20
-  );
-
-const getUsedHolidayDays = (holidays, userId) => {
-  const approved = holidays.filter(
-    (holiday) => holiday.user_id === userId && holiday.status === "approved"
-  );
-
-  let total = 0;
-
-  approved.forEach((request) => {
-    const end = new Date(request.end_date);
-    const day = new Date(request.start_date);
-
-    while (day <= end) {
-      const dayOfWeek = day.getDay();
-      if (dayOfWeek >= 1 && dayOfWeek <= 5) total++;
-      day.setDate(day.getDate() + 1);
-    }
-  });
-
-  return total;
-};
-
-async function loadScheduleWindow(user, start, end) {
-  const { data: schedules, error: scheduleError } = await supabase
-    .from("schedules")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("company_id", user.company_id)
-    .gte("start_time", start.toISOString())
-    .lt("start_time", end.toISOString())
-    .order("start_time", { ascending: true });
-
-  if (scheduleError) throw scheduleError;
-
-  const { data: locations, error: locationError } = await supabase
-    .from("locations")
-    .select("*")
-    .eq("company_id", user.company_id);
-
-  if (locationError) throw locationError;
-
-  return (schedules || []).map((shift) => ({
-    ...shift,
-    location:
-      (locations || []).find((location) => location.id === shift.location_id) ||
-      null,
-  }));
-}
-
-async function loadHolidaySummary(user) {
-  const allowance = getHolidayAllowance(user);
-
-  const { data, error } = await supabase
-    .from("holidays")
-    .select("*")
-    .eq("company_id", user.company_id)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    return {
-      allowance,
-      remaining: allowance,
-    };
-  }
-
-  const used = getUsedHolidayDays(data || [], user.id);
-
-  return {
-    allowance,
-    remaining: Math.max(allowance - used, 0),
-  };
-}
-
-async function loadLatestAnnouncement(user) {
-  const now = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("announcements")
-    .select("*")
-    .eq("company_id", user.company_id)
-    .or(`expires_at.is.null,expires_at.gt.${now}`)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (error) return null;
-  return data?.[0] || null;
-}
-
-async function loadClockState() {
-  const localActiveShift = await getActiveShift();
-  let activeShift = localActiveShift || null;
-  let onBreak = !!localActiveShift?.break_started_at;
-
-  try {
-    const token = (await supabase.auth.getSession()).data.session?.access_token;
-
-    if (token) {
-      const { data } = await API.get("/shifts/state", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      activeShift = data?.active_shift || null;
-      onBreak = !!data?.on_break;
-    }
-  } catch (err) {
-    console.log("Dashboard clock state sync failed:", err.message);
-  }
-
-  return {
-    activeShift,
-    onBreak,
-  };
-}
-
 export default function Dashboard() {
   const router = useRouter();
 
@@ -242,37 +96,31 @@ export default function Dashboard() {
 
       setError("");
 
-      const user = await getCurrentUser();
+      const data = await dashboardAPI.getMobile();
+      const user = data?.profile;
+
       if (!user) {
         setProfile(null);
         setError("No active session. Please sign in again.");
         return;
       }
 
-      const weekStart = getWeekStart(new Date());
-      const weekEnd = addDays(weekStart, 7);
-
-      const [today, schedules, shifts, clock, holidays, latestAnnouncement] =
-        await Promise.all([
-          getTodayShift(),
-          loadScheduleWindow(user, weekStart, weekEnd),
-          getShifts({
-            from: weekStart.toISOString(),
-            limit: 80,
-            throwOnError: true,
-          }),
-          loadClockState(),
-          loadHolidaySummary(user),
-          loadLatestAnnouncement(user),
-        ]);
-
       setProfile(user);
-      setTodayShift(today);
-      setWeekSchedule(schedules);
-      setWeekShifts(shifts || []);
-      setClockState(clock);
-      setHolidaySummary(holidays);
-      setAnnouncement(latestAnnouncement);
+      setTodayShift(data.today_shift || null);
+      setWeekSchedule(data.week_schedule || []);
+      setWeekShifts(data.week_shifts || []);
+      setClockState({
+        activeShift:
+          data.clock_state?.activeShift ||
+          data.clock_state?.active_shift ||
+          null,
+        onBreak:
+          data.clock_state?.onBreak ||
+          data.clock_state?.on_break ||
+          false,
+      });
+      setHolidaySummary(data.holiday_summary || { allowance: 0, remaining: 0 });
+      setAnnouncement(data.announcement || null);
     } catch (loadError) {
       setError(loadError.message || "Dashboard could not be loaded.");
     } finally {

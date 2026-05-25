@@ -8,6 +8,36 @@ const {
   requireRole,
 } = require("../middleware/auth");
 
+function getHolidayAllowance(profile) {
+  return Number(
+    profile?.holiday_allowance ??
+      profile?.holiday_days ??
+      profile?.annual_leave ??
+      20
+  );
+}
+
+function getUsedHolidayDays(holidays, userId) {
+  const approved = holidays.filter(
+    (holiday) => holiday.user_id === userId && holiday.status === "approved"
+  );
+
+  let total = 0;
+
+  approved.forEach((request) => {
+    const end = new Date(request.end_date);
+    const day = new Date(request.start_date);
+
+    while (day <= end) {
+      const dayOfWeek = day.getDay();
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) total++;
+      day.setDate(day.getDate() + 1);
+    }
+  });
+
+  return total;
+}
+
 //
 // ===================================
 // 📊 FULL FIX DASHBOARD ROUTE
@@ -303,6 +333,179 @@ router.get(
       return res.status(500).json({
         error:
           "Failed to load dashboard",
+      });
+    }
+  }
+);
+
+router.get(
+  "/mobile",
+  authenticateToken,
+  requireCompany,
+  async (req, res) => {
+    try {
+      const companyId = req.user.companyId;
+      const userId = req.user.id;
+
+      const weekStart = new Date();
+      weekStart.setHours(0, 0, 0, 0);
+      const diff = (weekStart.getDay() - 1 + 7) % 7;
+      weekStart.setDate(weekStart.getDate() - diff);
+
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const todayEnd = new Date(todayStart);
+      todayEnd.setDate(todayEnd.getDate() + 1);
+
+      const [
+        todayScheduleRes,
+        weekScheduleRes,
+        weekShiftsRes,
+        activeShiftRes,
+        holidaysRes,
+        announcementRes,
+      ] = await Promise.all([
+        query(
+          `
+          SELECT
+            s.*,
+            CASE
+              WHEN l.id IS NULL THEN NULL
+              ELSE json_build_object(
+                'id', l.id,
+                'name', l.name,
+                'address', l.address,
+                'latitude', l.latitude,
+                'longitude', l.longitude,
+                'radius', l.radius
+              )
+            END AS locations
+          FROM schedules s
+          LEFT JOIN locations l
+            ON l.id = s.location_id
+            AND l.company_id = s.company_id
+          WHERE s.user_id = $1
+          AND s.company_id = $2
+          AND s.start_time >= $3
+          AND s.start_time < $4
+          ORDER BY s.start_time ASC
+          LIMIT 1
+          `,
+          [userId, companyId, todayStart.toISOString(), todayEnd.toISOString()]
+        ),
+        query(
+          `
+          SELECT
+            s.*,
+            CASE
+              WHEN l.id IS NULL THEN NULL
+              ELSE json_build_object(
+                'id', l.id,
+                'name', l.name,
+                'address', l.address,
+                'latitude', l.latitude,
+                'longitude', l.longitude,
+                'radius', l.radius
+              )
+            END AS locations
+          FROM schedules s
+          LEFT JOIN locations l
+            ON l.id = s.location_id
+            AND l.company_id = s.company_id
+          WHERE s.user_id = $1
+          AND s.company_id = $2
+          AND s.start_time >= $3
+          AND s.start_time < $4
+          ORDER BY s.start_time ASC
+          `,
+          [userId, companyId, weekStart.toISOString(), weekEnd.toISOString()]
+        ),
+        query(
+          `
+          SELECT
+            s.*,
+            CASE
+              WHEN l.id IS NULL THEN NULL
+              ELSE json_build_object(
+                'id', l.id,
+                'name', l.name
+              )
+            END AS locations
+          FROM shifts s
+          LEFT JOIN locations l
+            ON l.id = s.location_id
+            AND l.company_id = s.company_id
+          WHERE s.user_id = $1
+          AND s.company_id = $2
+          AND s.clock_in_time >= $3
+          ORDER BY s.clock_in_time DESC
+          LIMIT 80
+          `,
+          [userId, companyId, weekStart.toISOString()]
+        ),
+        query(
+          `
+          SELECT *
+          FROM shifts
+          WHERE user_id = $1
+          AND company_id = $2
+          AND clock_out_time IS NULL
+          ORDER BY clock_in_time DESC
+          LIMIT 1
+          `,
+          [userId, companyId]
+        ),
+        query(
+          `
+          SELECT *
+          FROM holidays
+          WHERE company_id = $1
+          ORDER BY created_at DESC
+          `,
+          [companyId]
+        ),
+        query(
+          `
+          SELECT id, title, message, priority, expires_at, created_at
+          FROM announcements
+          WHERE company_id = $1
+          AND (expires_at IS NULL OR expires_at > NOW())
+          ORDER BY created_at DESC
+          LIMIT 1
+          `,
+          [companyId]
+        ),
+      ]);
+
+      const activeShift = activeShiftRes.rows[0] || null;
+      const holidays = holidaysRes.rows || [];
+      const allowance = getHolidayAllowance(req.user);
+      const used = getUsedHolidayDays(holidays, userId);
+
+      return res.json({
+        profile: req.user,
+        today_shift: todayScheduleRes.rows[0] || null,
+        week_schedule: weekScheduleRes.rows || [],
+        week_shifts: weekShiftsRes.rows || [],
+        clock_state: {
+          activeShift,
+          active_shift: activeShift,
+          on_break: activeShift ? !!activeShift.break_started_at : false,
+        },
+        holiday_summary: {
+          allowance,
+          remaining: Math.max(allowance - used, 0),
+        },
+        announcement: announcementRes.rows[0] || null,
+      });
+    } catch (error) {
+      console.error("MOBILE DASHBOARD ERROR:", error);
+      return res.status(500).json({
+        error: "Failed to load mobile dashboard",
       });
     }
   }

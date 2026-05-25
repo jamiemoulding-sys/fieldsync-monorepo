@@ -1,19 +1,10 @@
-import { supabase } from "./supabase";
+import API from "../services/api";
 
 export async function getCurrentUser() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return null;
-
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-
-  if (error) return null;
-
-  return data;
+  try {
+    const { data } = await API.get("/auth/me");
+    return data?.user || null;
+  } catch {
+    return null;
+  }
 }

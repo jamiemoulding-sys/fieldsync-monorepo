@@ -10,11 +10,17 @@ CREATE TABLE IF NOT EXISTS public.payslips (
   net_pay numeric(12, 2) NOT NULL DEFAULT 0,
   hours_worked numeric(10, 2) NOT NULL DEFAULT 0,
   file_path text NOT NULL,
+  uploaded_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   sent_at timestamptz,
+  downloaded_at timestamptz,
   CONSTRAINT payslips_period_valid CHECK (pay_period_end >= pay_period_start),
   CONSTRAINT payslips_file_path_not_public CHECK (file_path !~* '^https?://')
 );
+
+ALTER TABLE public.payslips
+  ADD COLUMN IF NOT EXISTS uploaded_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS downloaded_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS idx_payslips_company_period
   ON public.payslips(company_id, pay_period_end DESC);

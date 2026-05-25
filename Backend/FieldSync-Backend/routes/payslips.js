@@ -1,11 +1,13 @@
 const express = require("express");
 const { createClient } = require("@supabase/supabase-js");
+const multer = require("multer");
 
 const router = express.Router();
 const { query } = require("../database/connection");
 const {
   authenticateToken,
   requireCompany,
+  requireRole,
 } = require("../middleware/auth");
 
 const supabase = createClient(
@@ -20,6 +22,12 @@ const supabase = createClient(
 );
 
 const SIGNED_URL_TTL_SECONDS = 60 * 5;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+});
 
 function canAccessCompanyPayslips(user) {
   return user.role === "admin" || user.role === "manager";
@@ -49,10 +57,61 @@ function publicPayslip(row) {
     gross_pay: row.gross_pay,
     net_pay: row.net_pay,
     hours_worked: row.hours_worked,
+    uploaded_by: row.uploaded_by,
     created_at: row.created_at,
     sent_at: row.sent_at,
+    downloaded_at: row.downloaded_at,
+    file_name: row.file_path ? row.file_path.split("/").pop() : null,
     has_file: !!row.file_path,
   };
+}
+
+function isPdf(file) {
+  return (
+    file?.mimetype === "application/pdf" &&
+    file.buffer?.slice(0, 4).toString() === "%PDF"
+  );
+}
+
+function sanitizeFilePart(value) {
+  return String(value || "payslip")
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 80);
+}
+
+function parseMoney(value, field) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number < 0) {
+    const error = new Error(`${field} must be a non-negative number`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return number;
+}
+
+function parseRequiredDate(value, field) {
+  if (!value || Number.isNaN(new Date(value).getTime())) {
+    const error = new Error(`${field} is required`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+async function loadEmployeeForCompany(employeeId, companyId) {
+  const result = await query(
+    `
+    SELECT id, company_id
+    FROM users
+    WHERE id = $1
+    AND company_id = $2
+    LIMIT 1
+    `,
+    [employeeId, companyId]
+  );
+
+  return result.rows[0] || null;
 }
 
 async function loadPayslip(req, id) {
@@ -141,6 +200,116 @@ router.get(
   }
 );
 
+router.post(
+  "/",
+  authenticateToken,
+  requireCompany,
+  requireRole("manager", "admin"),
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!isPdf(req.file)) {
+        return res.status(400).json({ error: "A PDF payslip file is required" });
+      }
+
+      const employeeId = req.body.employee_id || req.body.user_id;
+      const employee = await loadEmployeeForCompany(employeeId, req.user.companyId);
+
+      if (!employee) {
+        return res.status(404).json({ error: "Employee not found" });
+      }
+
+      const payPeriodStart = parseRequiredDate(
+        req.body.pay_period_start || req.body.from,
+        "pay_period_start"
+      );
+      const payPeriodEnd = parseRequiredDate(
+        req.body.pay_period_end || req.body.to,
+        "pay_period_end"
+      );
+
+      if (new Date(payPeriodEnd) < new Date(payPeriodStart)) {
+        return res.status(400).json({ error: "Pay period end must be after start" });
+      }
+
+      const grossPay = parseMoney(req.body.gross_pay, "gross_pay");
+      const netPay = parseMoney(req.body.net_pay, "net_pay");
+      const hoursWorked = parseMoney(req.body.hours_worked, "hours_worked");
+      const publish = req.body.publish === "true" || req.body.publish === true;
+
+      const fileName = sanitizeFilePart(
+        req.file.originalname || `payslip-${payPeriodStart}-${payPeriodEnd}.pdf`
+      );
+      const filePath = [
+        req.user.companyId,
+        employeeId,
+        `${payPeriodStart}_${payPeriodEnd}_${Date.now()}_${fileName}`,
+      ].join("/");
+
+      const { error: uploadError } = await supabase.storage
+        .from("payslips")
+        .upload(filePath, req.file.buffer, {
+          contentType: "application/pdf",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("PAYSLIP STORAGE UPLOAD ERROR:", uploadError.message);
+        return res.status(500).json({ error: "Failed to store payslip PDF" });
+      }
+
+      const result = await query(
+        `
+        INSERT INTO payslips (
+          company_id,
+          employee_id,
+          pay_period_start,
+          pay_period_end,
+          gross_pay,
+          net_pay,
+          hours_worked,
+          file_path,
+          uploaded_by,
+          sent_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CASE WHEN $10 THEN NOW() ELSE NULL END)
+        ON CONFLICT (employee_id, pay_period_start, pay_period_end)
+        DO UPDATE SET
+          company_id = EXCLUDED.company_id,
+          gross_pay = EXCLUDED.gross_pay,
+          net_pay = EXCLUDED.net_pay,
+          hours_worked = EXCLUDED.hours_worked,
+          file_path = EXCLUDED.file_path,
+          uploaded_by = EXCLUDED.uploaded_by,
+          sent_at = CASE WHEN $10 THEN NOW() ELSE payslips.sent_at END
+        RETURNING *
+        `,
+        [
+          req.user.companyId,
+          employeeId,
+          payPeriodStart,
+          payPeriodEnd,
+          grossPay,
+          netPay,
+          hoursWorked,
+          filePath,
+          req.user.id,
+          publish,
+        ]
+      );
+
+      return res.status(publish ? 201 : 200).json({
+        payslip: publicPayslip(result.rows[0]),
+      });
+    } catch (error) {
+      console.error("PAYSLIP UPLOAD ERROR:", error.message);
+      return res.status(error.statusCode || 500).json({
+        error: error.statusCode ? error.message : "Failed to upload payslip",
+      });
+    }
+  }
+);
+
 router.get(
   "/:id",
   authenticateToken,
@@ -167,6 +336,40 @@ router.get(
   }
 );
 
+router.put(
+  "/:id/publish",
+  authenticateToken,
+  requireCompany,
+  requireRole("manager", "admin"),
+  async (req, res) => {
+    try {
+      const payslip = await loadPayslip(req, req.params.id);
+
+      if (!payslip) {
+        return res.status(404).json({ error: "Payslip not found" });
+      }
+
+      const result = await query(
+        `
+        UPDATE payslips
+        SET sent_at = NOW()
+        WHERE id = $1
+        AND company_id = $2
+        RETURNING *
+        `,
+        [req.params.id, req.user.companyId]
+      );
+
+      return res.json({
+        payslip: publicPayslip(result.rows[0]),
+      });
+    } catch (error) {
+      console.error("PAYSLIP PUBLISH ERROR:", error.message);
+      return res.status(500).json({ error: "Failed to publish payslip" });
+    }
+  }
+);
+
 router.get(
   "/:id/download",
   authenticateToken,
@@ -180,6 +383,19 @@ router.get(
       }
 
       const downloadUrl = await createSignedPayslipUrl(payslip.file_path, true);
+
+      if (payslip.employee_id === req.user.id) {
+        await query(
+          `
+          UPDATE payslips
+          SET downloaded_at = NOW()
+          WHERE id = $1
+          AND employee_id = $2
+          AND company_id = $3
+          `,
+          [payslip.id, req.user.id, req.user.companyId]
+        );
+      }
 
       return res.json({
         id: payslip.id,

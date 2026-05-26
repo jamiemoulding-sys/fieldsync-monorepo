@@ -8,6 +8,12 @@ import { clearQueue, getQueue } from "./syncQueue";
 
 const STATUS_KEY = "sync_status";
 
+function devLog(...args) {
+  if (__DEV__) {
+    console.log(...args);
+  }
+}
+
 export async function setStatus(status) {
   await AsyncStorage.setItem(STATUS_KEY, status);
 }
@@ -29,7 +35,7 @@ export async function processQueue() {
     return;
   }
 
-  console.log("🔄 Processing queue:", queue.length);
+  devLog("Processing queue:", queue.length);
 
   await setStatus("syncing");
 
@@ -38,9 +44,9 @@ export async function processQueue() {
   for (const job of queue) {
     try {
       await API.post("/route", job);
-      console.log("✅ Synced job");
+      devLog("Synced job");
     } catch (err) {
-      console.log("❌ Failed job, keeping in queue");
+      devLog("Failed job, keeping in queue");
       failed.push(job);
     }
   }

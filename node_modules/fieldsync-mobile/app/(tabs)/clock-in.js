@@ -578,14 +578,6 @@ export default function ClockIn() {
           )}
         </TouchableOpacity>
 
-        <View style={styles.missingCard}>
-          <Text style={styles.missingTitle}>Backend gaps to complete paths</Text>
-          <Text style={styles.missingText}>
-            Add an employee shift detail endpoint with assigned job/path stops and a
-            server tracking ping endpoint. Current tracking writes to Supabase
-            `shift_route_logs` while clocked in.
-          </Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );

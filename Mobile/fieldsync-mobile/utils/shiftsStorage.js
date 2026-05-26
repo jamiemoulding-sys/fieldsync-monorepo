@@ -2,6 +2,12 @@ import { supabase } from "./supabase";
 import { getCurrentUser } from "./session";
 import { getTodayShift } from "./schedule";
 
+function devLog(...args) {
+  if (__DEV__) {
+    console.log(...args);
+  }
+}
+
 /* =========================
    ▶️ START SHIFT
 ========================= */
@@ -10,7 +16,7 @@ export async function startShift(locationId, isOpenShift = false) {
     const user = await getCurrentUser();
 
     if (!user) {
-      console.log("NO USER");
+      devLog("NO USER");
       return null;
     }
 
@@ -50,13 +56,13 @@ export async function startShift(locationId, isOpenShift = false) {
       .single();
 
     if (error) {
-      console.log("START SHIFT ERROR:", error);
+      devLog("START SHIFT ERROR:", error);
       return null;
     }
 
     return data;
   } catch (err) {
-    console.log("START SHIFT CRASH:", err);
+    devLog("START SHIFT CRASH:", err);
     return null;
   }
 }
@@ -78,13 +84,13 @@ export async function endShift(shiftId) {
       .single();
 
     if (error) {
-      console.log("END SHIFT ERROR:", error);
+      devLog("END SHIFT ERROR:", error);
       return null;
     }
 
     return data;
   } catch (err) {
-    console.log("END SHIFT CRASH:", err);
+    devLog("END SHIFT CRASH:", err);
     return null;
   }
 }
@@ -106,13 +112,13 @@ export async function getActiveShift() {
       .limit(1);
 
     if (error) {
-      console.log("ACTIVE SHIFT ERROR:", error);
+      devLog("ACTIVE SHIFT ERROR:", error);
       return null;
     }
 
     return data?.[0] || null;
   } catch (err) {
-    console.log("ACTIVE SHIFT CRASH:", err);
+    devLog("ACTIVE SHIFT CRASH:", err);
     return null;
   }
 }

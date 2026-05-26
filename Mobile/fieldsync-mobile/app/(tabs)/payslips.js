@@ -116,7 +116,6 @@ export default function Payslips() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [setupMissing, setSetupMissing] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
   const sheetAnim = useRef(new Animated.Value(0)).current;
@@ -130,7 +129,6 @@ export default function Payslips() {
       }
 
       setError("");
-      setSetupMissing(false);
 
       const [data, downloaded] = await Promise.all([
         payslipAPI.getAll(),
@@ -143,10 +141,9 @@ export default function Payslips() {
       setPayslips([]);
 
       if (status === 404 || status === 403) {
-        setSetupMissing(status === 404);
         setError(
           status === 404
-            ? "Payslip service is not configured yet."
+            ? "Payslips are not available for this account yet."
             : "You do not have access to payslips for this account."
         );
       } else {
@@ -317,15 +314,9 @@ export default function Payslips() {
             </View>
             <View style={styles.errorBody}>
               <Text style={styles.errorTitle}>
-                {setupMissing ? "Backend setup needed" : "Payslips unavailable"}
+                Payslips unavailable
               </Text>
               <Text style={styles.errorText}>{error}</Text>
-              {setupMissing ? (
-                <Text style={styles.setupText}>
-                  Add a server-side payslips table with secure Supabase Storage file
-                  paths and an employee-scoped API that returns signed view/download URLs.
-                </Text>
-              ) : null}
               <TouchableOpacity style={styles.retryButton} onPress={() => loadPayslips()}>
                 <Text style={styles.retryText}>Retry</Text>
               </TouchableOpacity>
@@ -353,7 +344,7 @@ export default function Payslips() {
         </View>
 
         {payslips.length === 0 ? (
-          <EmptyState setupMissing={setupMissing} />
+          <EmptyState />
         ) : (
           payslips.map((payslip, index) => (
             <PayslipCard
@@ -450,17 +441,15 @@ function PayItem({ label, value, accent = false }) {
   );
 }
 
-function EmptyState({ setupMissing }) {
+function EmptyState() {
   return (
     <View style={styles.emptyCard}>
       <Ionicons name="document-lock-outline" size={44} color="#64748b" />
       <Text style={styles.emptyTitle}>
-        {setupMissing ? "Payslips are not wired up yet" : "No payslips available"}
+        No payslips available
       </Text>
       <Text style={styles.emptyText}>
-        {setupMissing
-          ? "The mobile app is ready for server-side payslips once the backend endpoint and payslips table are added."
-          : "Published payslips will appear here once payroll uploads them."}
+        Published payslips will appear here once payroll uploads them.
       </Text>
     </View>
   );

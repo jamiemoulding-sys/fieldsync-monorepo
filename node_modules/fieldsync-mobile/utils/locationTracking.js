@@ -8,6 +8,12 @@ const TRACKING_CONTEXT_KEY = "fieldsync_tracking_context";
 
 let lastCoords = null;
 
+function devLog(...args) {
+  if (__DEV__) {
+    console.log(...args);
+  }
+}
+
 async function getTrackingContext() {
   const raw = await AsyncStorage.getItem(TRACKING_CONTEXT_KEY);
   return raw ? JSON.parse(raw) : null;
@@ -46,7 +52,7 @@ async function sendLocationPing(coords) {
   try {
     await API.post("/tracking/pings", payload);
   } catch (error) {
-    console.log("TRACKING PING ERROR:", error.response?.data?.error || error.message);
+    devLog("TRACKING PING ERROR:", error.response?.data?.error || error.message);
   }
 }
 
@@ -73,7 +79,7 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 
 export async function startTracking(context) {
   if (!context?.shiftId || !context?.userId || !context?.companyId) {
-    console.log("TRACKING NOT STARTED: missing context");
+    devLog("TRACKING NOT STARTED: missing context");
     return false;
   }
 
@@ -84,7 +90,7 @@ export async function startTracking(context) {
 
   const bg = await Location.requestBackgroundPermissionsAsync();
   if (bg.status !== "granted") {
-    console.log("Background tracking permission not granted; foreground tracking only.");
+    devLog("Background tracking permission not granted; foreground tracking only.");
     return true;
   }
 
@@ -99,7 +105,7 @@ export async function startTracking(context) {
     pausesUpdatesAutomatically: false,
   });
 
-  console.log("Tracking started");
+  devLog("Tracking started");
   return true;
 }
 
@@ -112,7 +118,7 @@ export async function stopTracking() {
 
   await clearTrackingContext();
   lastCoords = null;
-  console.log("Tracking stopped");
+  devLog("Tracking stopped");
 }
 
 export async function isTrackingActive() {

@@ -1,5 +1,11 @@
 import { shiftAPI } from "../services/api";
 
+function devLog(...args) {
+  if (__DEV__) {
+    console.log(...args);
+  }
+}
+
 export async function getShifts(options = {}) {
   const {
     before,
@@ -15,7 +21,7 @@ export async function getShifts(options = {}) {
       limit,
     });
   } catch (error) {
-    console.log("GET SHIFTS ERROR:", error.userMessage || error.message);
+    devLog("GET SHIFTS ERROR:", error.userMessage || error.message);
     if (throwOnError) throw error;
     return [];
   }

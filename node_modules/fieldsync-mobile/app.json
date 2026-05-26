@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "fieldsync-mobile",
+    "name": "FieldSync",
     "slug": "fieldsync-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,8 +11,12 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "We use your location to track work shifts.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "We use your location to track your route during work shifts, even in the background.",
+        "NSLocationWhenInUseUsageDescription": "FieldSync uses your location while you are working to confirm you are at an assigned site when clocking in or out.",
+        "NSLocationAlwaysUsageDescription": "FieldSync uses background location only during an active clocked-in shift to record work travel for your employer.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "FieldSync uses your location during active shifts, including in the background after clock-in, to record work travel and stop tracking after clock-out.",
+        "UIBackgroundModes": [
+          "location"
+        ],
         "ITSAppUsesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.zorviatech.fieldsyncmobile"
@@ -26,7 +30,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.fieldsyncmobile"
+      "package": "com.zorviatech.fieldsyncmobile"
     },
     "web": {
       "output": "static",
@@ -53,6 +57,7 @@
     },
     "extra": {
       "router": {},
+      "apiUrl": "https://app.zorviatech.co.uk/api",
       "eas": {
         "projectId": "28d175ee-360d-4c51-b22c-00908ae68cee"
       }

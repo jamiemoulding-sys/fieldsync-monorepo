@@ -35,13 +35,6 @@ export default function Home() {
       >
         <Text style={styles.buttonText}>Login</Text>
       </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.buttonOutline}
-        onPress={() => alert("Register coming soon")}
-      >
-        <Text style={styles.buttonOutlineText}>Register</Text>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -73,18 +66,6 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: "#fff",
-    textAlign: "center",
-    fontWeight: "600",
-  },
-  buttonOutline: {
-    width: "100%",
-    borderColor: "#6366f1",
-    borderWidth: 1,
-    padding: 15,
-    borderRadius: 12,
-  },
-  buttonOutlineText: {
-    color: "#6366f1",
     textAlign: "center",
     fontWeight: "600",
   },

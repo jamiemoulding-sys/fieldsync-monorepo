@@ -1,5 +1,11 @@
 import { scheduleAPI } from "../services/api";
 
+function devLog(...args) {
+  if (__DEV__) {
+    console.log(...args);
+  }
+}
+
 export async function getSchedule(params = {}) {
   return await scheduleAPI.getMine(params);
 }
@@ -31,7 +37,7 @@ export async function getTodayShift() {
       tasks: shift.tasks || [],
     };
   } catch (err) {
-    console.log("GET TODAY SHIFT ERROR:", err.userMessage || err.message);
+    devLog("GET TODAY SHIFT ERROR:", err.userMessage || err.message);
     return null;
   }
 }

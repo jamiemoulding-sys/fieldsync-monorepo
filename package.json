@@ -1,10 +1,11 @@
 {
   "private": true,
   "scripts": {
+    "build:shared": "npm --workspace @fieldsync/shared run build",
     "check:backend": "node scripts/quality-check.js",
     "check:mobile": "npm --workspace Mobile/fieldsync-mobile run lint",
     "check:frontend": "npm --workspace Frontend/fieldsync-frontend run build",
-    "check": "npm run check:backend && npm --workspace Backend/FieldSync-Backend test -- --runInBand --passWithNoTests && npm run check:mobile"
+    "check": "npm run build:shared && npm run check:backend && npm --workspace Backend/FieldSync-Backend test -- --runInBand --passWithNoTests && npm run check:mobile"
   },
   "workspaces": [
     "Backend/FieldSync-Backend",

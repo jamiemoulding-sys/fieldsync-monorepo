@@ -8,10 +8,50 @@ const {
 } = require('../middleware/auth');
 
 const { query } = require('../database/connection');
+const logger = require('../utils/logger');
 const { 
   scheduleCreationSchema,
   leaveRequestCreateSchema 
 } = require('@fieldsync/shared');
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function getCompanyId(req) {
+  return req.user?.company_id || req.user?.companyId;
+}
+
+function routeMeta(req, routeName, status = undefined) {
+  return {
+    endpoint: `${req.method} ${req.baseUrl}${req.route?.path || ''}`,
+    routeName,
+    companyId: getCompanyId(req),
+    userId: req.user?.id,
+    status,
+  };
+}
+
+function logRouteStart(req, routeName) {
+  logger.info('Schedule route request', routeMeta(req, routeName, 'started'));
+}
+
+function logRouteFailure(req, routeName, error) {
+  logger.error(`${routeName} failed`, error);
+  logger.warn('Schedule route failed', routeMeta(req, routeName, 500));
+}
+
+function normalizeScheduleLocationId(locationId, req, routeName) {
+  if (!locationId) return null;
+
+  const value = String(locationId).trim();
+  if (UUID_RE.test(value)) return value;
+
+  logger.warn('Ignoring incompatible schedule location_id', {
+    ...routeMeta(req, routeName),
+    reason: 'schedules.location_id is uuid but locations.id is integer',
+  });
+
+  return null;
+}
 
 function pickScheduleCreatePayload(body) {
   const allowed = [
@@ -61,19 +101,23 @@ router.get('/',
   authenticateToken,
   requireCompany,
   async (req, res) => {
+    const routeName = 'schedules.list';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const result = await query(`
         SELECT s.*, u.name
         FROM schedules s
         JOIN users u ON u.id = s.user_id
         WHERE u.company_id = $1
         ORDER BY s.date DESC
-      `, [req.user.companyId]);
+      `, [companyId]);
 
       res.json(result.rows);
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Failed to fetch schedules' });
     }
   }
@@ -87,8 +131,12 @@ router.get('/my-schedule',
   authenticateToken,
   requireCompany,
   async (req, res) => {
+    const routeName = 'schedules.mySchedule';
+    logRouteStart(req, routeName);
+
     try {
-      const params = [req.user.id, req.user.companyId];
+      const companyId = getCompanyId(req);
+      const params = [req.user.id, companyId];
       const filters = [];
       const limit = Math.min(Number(req.query.limit) || 100, 200);
 
@@ -107,21 +155,8 @@ router.get('/my-schedule',
       const result = await query(`
         SELECT
           s.*,
-          CASE
-            WHEN l.id IS NULL THEN NULL
-            ELSE json_build_object(
-              'id', l.id,
-              'name', l.name,
-              'address', l.address,
-              'latitude', l.latitude,
-              'longitude', l.longitude,
-              'radius', l.radius
-            )
-          END AS locations
+          NULL::json AS locations
         FROM schedules s
-        LEFT JOIN locations l
-          ON l.id = s.location_id
-          AND l.company_id = s.company_id
         WHERE s.user_id = $1
         AND s.company_id = $2
         ${filters.length ? `AND ${filters.join(' AND ')}` : ''}
@@ -132,7 +167,7 @@ router.get('/my-schedule',
       res.json(result.rows);
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Failed to fetch schedule' });
     }
   }
@@ -147,7 +182,11 @@ router.post('/',
   requireCompany,
   requireRole('admin', 'manager'),
   async (req, res) => {
+    const routeName = 'schedules.create';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const parsed = scheduleCreationSchema.safeParse(
         pickScheduleCreatePayload(req.body)
       );
@@ -157,11 +196,12 @@ router.post('/',
       }
 
       const { user_id, date, start_time, end_time, location_id } = parsed.data;
+      const scheduleLocationId = normalizeScheduleLocationId(location_id, req, routeName);
 
       // 🔒 validate user belongs to company
       const userCheck = await query(
         `SELECT id FROM users WHERE id = $1 AND company_id = $2`,
-        [user_id, req.user.companyId]
+        [user_id, companyId]
       );
 
       if (userCheck.rows.length === 0) {
@@ -173,8 +213,8 @@ router.post('/',
       // 🚨 PREVENT DUPLICATE SHIFTS
       const existing = await query(
         `SELECT id FROM schedules
-         WHERE user_id = $1 AND date = $2`,
-        [user_id, date]
+         WHERE user_id = $1 AND date = $2 AND company_id = $3`,
+        [user_id, date, companyId]
       );
 
       if (existing.rows.length > 0) {
@@ -183,31 +223,18 @@ router.post('/',
         });
       }
 
-      if (location_id) {
-        const locationCheck = await query(
-          `SELECT id FROM locations WHERE id = $1 AND company_id = $2`,
-          [location_id, req.user.companyId]
-        );
-
-        if (locationCheck.rows.length === 0) {
-          return res.status(403).json({
-            error: 'Invalid location for this company'
-          });
-        }
-      }
-
       const result = await query(`
         INSERT INTO schedules (user_id, date, start_time, end_time, company_id, location_id)
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *
-      `, [user_id, date, start_time, end_time, req.user.companyId, location_id || null]);
+      `, [user_id, date, start_time, end_time, companyId, scheduleLocationId]);
 
       // 🧠 ACTIVITY LOG
       await query(
         `INSERT INTO activity_logs (company_id, user_id, action)
          VALUES ($1, $2, $3)`,
         [
-          req.user.companyId,
+          companyId,
           req.user.id,
           `Created shift for user ${user_id} on ${date}`
         ]
@@ -216,7 +243,7 @@ router.post('/',
       res.status(201).json(result.rows[0]);
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Create failed' });
     }
   }
@@ -231,7 +258,11 @@ router.post('/bulk',
   requireCompany,
   requireRole('admin', 'manager'),
   async (req, res) => {
+    const routeName = 'schedules.bulkCreate';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const { shifts } = req.body;
 
       if (!Array.isArray(shifts) || shifts.length === 0) {
@@ -257,30 +288,22 @@ router.post('/bulk',
         }
 
         const { user_id, date, start_time, end_time, location_id } = parsed.data;
+        const scheduleLocationId = normalizeScheduleLocationId(location_id, req, routeName);
 
         // prevent duplicates
         const exists = await query(
           `SELECT id FROM schedules WHERE user_id=$1 AND date=$2 AND company_id=$3`,
-          [user_id, date, req.user.companyId]
+          [user_id, date, companyId]
         );
 
         if (exists.rows.length > 0) continue;
 
         const userCheck = await query(
           `SELECT id FROM users WHERE id = $1 AND company_id = $2`,
-          [user_id, req.user.companyId]
+          [user_id, companyId]
         );
 
         if (userCheck.rows.length === 0) continue;
-
-        if (location_id) {
-          const locationCheck = await query(
-            `SELECT id FROM locations WHERE id = $1 AND company_id = $2`,
-            [location_id, req.user.companyId]
-          );
-
-          if (locationCheck.rows.length === 0) continue;
-        }
 
         const result = await query(
           `INSERT INTO schedules
@@ -292,8 +315,8 @@ router.post('/bulk',
             date,
             start_time,
             end_time,
-            req.user.companyId,
-            location_id || null
+            companyId,
+            scheduleLocationId
           ]
         );
 
@@ -306,7 +329,7 @@ router.post('/bulk',
       });
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Bulk insert failed' });
     }
   }
@@ -321,31 +344,23 @@ router.put('/:id',
   requireCompany,
   requireRole('admin', 'manager'),
   async (req, res) => {
+    const routeName = 'schedules.update';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const { user_id, date, start_time, end_time, location_id } = req.body;
+      const scheduleLocationId = normalizeScheduleLocationId(location_id, req, routeName);
 
       if (user_id) {
         const userCheck = await query(
           `SELECT id FROM users WHERE id = $1 AND company_id = $2`,
-          [user_id, req.user.companyId]
+          [user_id, companyId]
         );
 
         if (userCheck.rows.length === 0) {
           return res.status(403).json({
             error: 'Invalid user for this company'
-          });
-        }
-      }
-
-      if (location_id) {
-        const locationCheck = await query(
-          `SELECT id FROM locations WHERE id = $1 AND company_id = $2`,
-          [location_id, req.user.companyId]
-        );
-
-        if (locationCheck.rows.length === 0) {
-          return res.status(403).json({
-            error: 'Invalid location for this company'
           });
         }
       }
@@ -365,9 +380,9 @@ router.put('/:id',
         date,
         start_time,
         end_time,
-        location_id,
+        scheduleLocationId,
         req.params.id,
-        req.user.companyId
+        companyId
       ]);
 
       if (!result.rows[0]) {
@@ -379,7 +394,7 @@ router.put('/:id',
       res.json(result.rows[0]);
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Update failed' });
     }
   }
@@ -394,12 +409,16 @@ router.delete('/:id',
   requireCompany,
   requireRole('admin'),
   async (req, res) => {
+    const routeName = 'schedules.delete';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const result = await query(
         `DELETE FROM schedules
          WHERE id = $1 AND company_id = $2
          RETURNING id`,
-        [req.params.id, req.user.companyId]
+        [req.params.id, companyId]
       );
 
       if (!result.rows[0]) {
@@ -411,7 +430,7 @@ router.delete('/:id',
       res.json({ message: 'Deleted' });
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Delete failed' });
     }
   }
@@ -425,7 +444,11 @@ router.get('/late-arrivals',
   authenticateToken,
   requireCompany,
   async (req, res) => {
+    const routeName = 'schedules.lateArrivals';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const result = await query(`
         SELECT u.name, s.date, s.start_time, sh.clock_in_time
         FROM schedules s
@@ -436,12 +459,12 @@ router.get('/late-arrivals',
         WHERE u.company_id = $1
         AND sh.clock_in_time IS NOT NULL
         AND sh.clock_in_time > s.start_time
-      `, [req.user.companyId]);
+      `, [companyId]);
 
       res.json(result.rows);
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Late arrivals failed' });
     }
   }
@@ -457,7 +480,11 @@ router.post('/holiday-requests',
   authenticateToken,
   requireCompany,
   async (req, res) => {
+    const routeName = 'holidays.create';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const parsed = leaveRequestCreateSchema.safeParse(
         pickLeaveCreatePayload(req.body)
       );
@@ -477,7 +504,7 @@ router.post('/holiday-requests',
 
       const userCheck = await query(
         `SELECT id FROM users WHERE id = $1 AND company_id = $2`,
-        [targetUserId, req.user.companyId]
+        [targetUserId, companyId]
       );
 
       if (userCheck.rows.length === 0) {
@@ -491,12 +518,12 @@ router.post('/holiday-requests',
         (user_id, start_date, end_date, status, company_id)
         VALUES ($1, $2, $3, $4, $5)
         RETURNING *
-      `, [targetUserId, start_date, end_date, status, req.user.companyId]);
+      `, [targetUserId, start_date, end_date, status, companyId]);
 
       res.status(201).json(result.rows[0]);
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Create failed' });
     }
   }
@@ -507,19 +534,23 @@ router.get('/holiday-requests',
   authenticateToken,
   requireCompany,
   async (req, res) => {
+    const routeName = 'holidays.list';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const result = await query(`
         SELECT h.*, u.name
         FROM holidays h
         JOIN users u ON u.id = h.user_id
         WHERE h.company_id = $1
         ORDER BY h.start_date DESC
-      `, [req.user.companyId]);
+      `, [companyId]);
 
       res.json(result.rows);
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Fetch failed' });
     }
   }
@@ -531,7 +562,11 @@ router.put('/holiday-requests/:id',
   requireCompany,
   requireRole('admin', 'manager'),
   async (req, res) => {
+    const routeName = 'holidays.update';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       const { status } = req.body;
 
       const result = await query(`
@@ -547,7 +582,7 @@ router.put('/holiday-requests/:id',
         req.body.reason || null,
         req.user.id,
         req.params.id,
-        req.user.companyId,
+        companyId,
       ]);
 
       if (!result.rows[0]) {
@@ -559,7 +594,7 @@ router.put('/holiday-requests/:id',
       res.json(result.rows[0]);
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Update failed' });
     }
   }
@@ -571,17 +606,21 @@ router.delete('/holiday-requests/:id',
   requireCompany,
   requireRole('admin', 'manager'),
   async (req, res) => {
+    const routeName = 'holidays.delete';
+    logRouteStart(req, routeName);
+
     try {
+      const companyId = getCompanyId(req);
       await query(
         `DELETE FROM holidays
          WHERE id = $1 AND company_id = $2`,
-        [req.params.id, req.user.companyId]
+        [req.params.id, companyId]
       );
 
       res.json({ message: 'Deleted' });
 
     } catch (error) {
-      console.error(error);
+      logRouteFailure(req, routeName, error);
       res.status(500).json({ error: 'Delete failed' });
     }
   }

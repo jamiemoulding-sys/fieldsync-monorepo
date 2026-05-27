@@ -133,6 +133,25 @@ function setupMocks() {
       );
     }
 
+    if (sql.includes("FROM schedules s") && sql.includes("WHERE s.user_id = $1")) {
+      const [userId, companyId] = params;
+      return jsonResponse(
+        userId === "employee-a" && companyId === "company-a"
+          ? [
+              {
+                id: 203,
+                user_id: userId,
+                company_id: companyId,
+                date: "2026-05-27",
+                start_time: "2026-05-27T09:00:00.000Z",
+                end_time: "2026-05-27T17:00:00.000Z",
+                locations: null,
+              },
+            ]
+          : []
+      );
+    }
+
     if (sql.includes("FROM users WHERE id = $1 AND company_id = $2")) {
       const [userId, companyId] = params;
       const user = usersById[userId];
@@ -395,6 +414,30 @@ describe("backend auth and company scoping", () => {
 
       expect(createResponse.status).toBe(201);
       expect(created.company_id).toBe("company-a");
+    });
+  });
+
+  test("/api/schedules/my-schedule avoids incompatible schedule location join", async () => {
+    const app = createApp();
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/schedules/my-schedule`, {
+        headers: authHeader("employee-a-token"),
+      });
+      const schedules = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(schedules[0]).toEqual(
+        expect.objectContaining({
+          user_id: "employee-a",
+          company_id: "company-a",
+          locations: null,
+        })
+      );
+      expect(queryMock).toHaveBeenCalledWith(
+        expect.not.stringContaining("JOIN locations"),
+        expect.arrayContaining(["employee-a", "company-a"])
+      );
     });
   });
 

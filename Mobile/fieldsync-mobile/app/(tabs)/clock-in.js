@@ -12,7 +12,9 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import SignInRequired from "../../components/SignInRequired";
 import API from "../../services/api";
+import { getActiveSessionToken, isAuthError } from "../../utils/authSession";
 import { getDistance } from "../../utils/geofence";
 import {
   isTrackingActive,
@@ -120,6 +122,7 @@ export default function ClockIn() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [noSession, setNoSession] = useState(false);
 
   const foregroundSubscription = useRef(null);
 
@@ -127,7 +130,7 @@ export default function ClockIn() {
   const routeStops = useMemo(() => normalizeRouteStops(shift), [shift]);
 
   const geofence = useMemo(() => {
-    if (!location || !currentLocation) {
+    if (!location || !currentLocation?.coords) {
       return {
         distance: null,
         inside: false,
@@ -165,6 +168,18 @@ export default function ClockIn() {
       }
 
       setError("");
+      setNoSession(false);
+
+      const token = await getActiveSessionToken();
+      if (!token) {
+        setUser(null);
+        setShift(null);
+        setActiveShift(null);
+        await stopTracking();
+        setTrackingActive(false);
+        setNoSession(true);
+        return;
+      }
 
       const [profile, todayShift, permission] = await Promise.all([
         getCurrentUser(),
@@ -180,6 +195,15 @@ export default function ClockIn() {
         const { data } = await API.get("/shifts/state");
         setActiveShift(data?.active_shift || null);
       } catch (stateError) {
+        if (isAuthError(stateError)) {
+          setUser(null);
+          setShift(null);
+          setActiveShift(null);
+          await stopTracking();
+          setTrackingActive(false);
+          setNoSession(true);
+          return;
+        }
         setError(stateError.message || "Could not load clock-in state.");
       }
 
@@ -192,6 +216,15 @@ export default function ClockIn() {
 
       setTrackingActive(await isTrackingActive());
     } catch (loadError) {
+      if (isAuthError(loadError)) {
+        setUser(null);
+        setShift(null);
+        setActiveShift(null);
+        await stopTracking();
+        setTrackingActive(false);
+        setNoSession(true);
+        return;
+      }
       setError(loadError.message || "Clock-in screen could not be loaded.");
     } finally {
       setLoading(false);
@@ -216,7 +249,16 @@ export default function ClockIn() {
       if (loading) return;
 
       if (!activeShift || !user) {
-        await stopTracking();
+        try {
+          await stopTracking();
+        } catch {
+          // Tracking cleanup is best-effort when the app has no active user.
+        }
+        setTrackingActive(false);
+        return;
+      }
+
+      if (!activeShift.id || !user.id || !user.company_id) {
         setTrackingActive(false);
         return;
       }
@@ -253,7 +295,9 @@ export default function ClockIn() {
         },
         (position) => {
           setCurrentLocation(position);
-          pingCurrentLocation(position.coords);
+          if (position?.coords) {
+            pingCurrentLocation(position.coords);
+          }
         }
       );
     }
@@ -300,6 +344,11 @@ export default function ClockIn() {
   async function handleClockIn() {
     if (actionLoading || activeShift) return;
 
+    if (!user?.id || !user?.company_id) {
+      setNoSession(true);
+      return;
+    }
+
     if (!shift || !location) {
       Alert.alert("No assigned site", "There is no site shift available to clock into.");
       return;
@@ -318,7 +367,7 @@ export default function ClockIn() {
       setActionLoading(true);
 
       const position = await getVerifiedPosition();
-      if (!position) return;
+      if (!position?.coords) return;
 
       const distance = getDistance(
         position.coords.latitude,
@@ -344,6 +393,9 @@ export default function ClockIn() {
       });
 
       const nextShift = response.data?.shift || response.data;
+      if (!nextShift?.id) {
+        throw new Error("Clock-in response did not include an active shift.");
+      }
       setActiveShift(nextShift);
 
       const started = await startTracking({
@@ -380,8 +432,8 @@ export default function ClockIn() {
       if (position) setCurrentLocation(position);
 
       await API.post("/shifts/clock-out", {
-        clock_out_lat: position?.coords.latitude,
-        clock_out_lng: position?.coords.longitude,
+        clock_out_lat: position?.coords?.latitude,
+        clock_out_lng: position?.coords?.longitude,
       });
 
       await stopTracking();
@@ -411,6 +463,10 @@ export default function ClockIn() {
         </View>
       </SafeAreaView>
     );
+  }
+
+  if (noSession) {
+    return <SignInRequired />;
   }
 
   const insideText =

@@ -13,6 +13,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import SignInRequired from "../../components/SignInRequired";
+import { getActiveSessionToken, isAuthError } from "../../utils/authSession";
 import { getShifts } from "../../utils/shifts";
 
 const PAGE_SIZE = 24;
@@ -251,6 +253,7 @@ export default function Shifts() {
   const [searchText, setSearchText] = useState("");
   const [dateFilter, setDateFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [noSession, setNoSession] = useState(false);
 
   const sheetAnim = useRef(new Animated.Value(0)).current;
 
@@ -264,6 +267,16 @@ export default function Shifts() {
         }
 
         setError("");
+        setNoSession(false);
+
+        const token = await getActiveSessionToken();
+        if (!token) {
+          setShifts([]);
+          setSelectedShift(null);
+          setHasMoreOlder(false);
+          setNoSession(true);
+          return;
+        }
 
         const data = await getShifts({
           from: getRecentStart(),
@@ -275,6 +288,12 @@ export default function Shifts() {
         setHasMoreOlder(true);
       } catch (loadError) {
         setShifts([]);
+        if (isAuthError(loadError)) {
+          setSelectedShift(null);
+          setHasMoreOlder(false);
+          setNoSession(true);
+          return;
+        }
         setError(loadError.message || "Shifts could not be loaded.");
       } finally {
         setLoading(false);
@@ -343,6 +362,13 @@ export default function Shifts() {
       setLoadingOlder(true);
       setError("");
 
+      const token = await getActiveSessionToken();
+      if (!token) {
+        setNoSession(true);
+        setHasMoreOlder(false);
+        return;
+      }
+
       const oldestShift = shifts[shifts.length - 1];
       const data = await getShifts({
         before: oldestShift ? toShiftDate(oldestShift) : getRecentStart(),
@@ -353,6 +379,11 @@ export default function Shifts() {
       setShifts((current) => mergeShiftPages(current, data || []));
       setHasMoreOlder((data || []).length === PAGE_SIZE);
     } catch (loadError) {
+      if (isAuthError(loadError)) {
+        setNoSession(true);
+        setHasMoreOlder(false);
+        return;
+      }
       setError(loadError.message || "Older shifts could not be loaded.");
     } finally {
       setLoadingOlder(false);
@@ -398,6 +429,10 @@ export default function Shifts() {
         </View>
       </SafeAreaView>
     );
+  }
+
+  if (noSession) {
+    return <SignInRequired />;
   }
 
   return (

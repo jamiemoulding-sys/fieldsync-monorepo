@@ -16,7 +16,9 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import SignInRequired from "../../components/SignInRequired";
 import { payslipAPI } from "../../services/api";
+import { getActiveSessionToken, isAuthError } from "../../utils/authSession";
 
 const DOWNLOADED_PAYSLIPS_KEY = "fieldsync_downloaded_payslips";
 
@@ -117,6 +119,7 @@ export default function Payslips() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [noSession, setNoSession] = useState(false);
 
   const sheetAnim = useRef(new Animated.Value(0)).current;
 
@@ -129,6 +132,15 @@ export default function Payslips() {
       }
 
       setError("");
+      setNoSession(false);
+
+      const token = await getActiveSessionToken();
+      if (!token) {
+        setPayslips([]);
+        setSelectedPayslip(null);
+        setNoSession(true);
+        return;
+      }
 
       const [data, downloaded] = await Promise.all([
         payslipAPI.getAll(),
@@ -140,7 +152,10 @@ export default function Payslips() {
       const status = loadError.response?.status;
       setPayslips([]);
 
-      if (status === 404 || status === 403) {
+      if (isAuthError(loadError)) {
+        setSelectedPayslip(null);
+        setNoSession(true);
+      } else if (status === 404 || status === 403) {
         setError(
           status === 404
             ? "Payslips are not available for this account yet."
@@ -280,6 +295,10 @@ export default function Payslips() {
         </View>
       </SafeAreaView>
     );
+  }
+
+  if (noSession) {
+    return <SignInRequired />;
   }
 
   return (

@@ -13,6 +13,8 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { SafeAreaView } from "react-native-safe-area-context";
+import SignInRequired from "../../components/SignInRequired";
+import { getActiveSessionToken, isAuthError } from "../../utils/authSession";
 import { getSchedule } from "../../utils/schedule";
 
 const todayKey = new Date().toISOString().slice(0, 10);
@@ -117,6 +119,7 @@ export default function Schedule() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [noSession, setNoSession] = useState(false);
 
   const sheetAnim = useRef(new Animated.Value(0)).current;
 
@@ -129,6 +132,15 @@ export default function Schedule() {
       }
 
       setError("");
+      setNoSession(false);
+
+      const token = await getActiveSessionToken();
+      if (!token) {
+        setShifts([]);
+        setSelectedShift(null);
+        setNoSession(true);
+        return;
+      }
 
       const schedules = await getSchedule();
 
@@ -140,6 +152,11 @@ export default function Schedule() {
       setShifts(merged);
     } catch (loadError) {
       setShifts([]);
+      if (isAuthError(loadError)) {
+        setSelectedShift(null);
+        setNoSession(true);
+        return;
+      }
       setError(loadError.message || "Schedule could not be loaded.");
     } finally {
       setLoading(false);
@@ -220,6 +237,10 @@ export default function Schedule() {
         </View>
       </SafeAreaView>
     );
+  }
+
+  if (noSession) {
+    return <SignInRequired />;
   }
 
   return (

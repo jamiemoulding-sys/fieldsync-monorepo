@@ -11,9 +11,10 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import SignInRequired from "../../components/SignInRequired";
 import API from "../../services/api";
+import { clearLocalSession, getActiveSessionToken, isAuthError } from "../../utils/authSession";
 import { getCurrentUser } from "../../utils/session";
-import { removeToken, setToken } from "../../utils/auth";
 import { supabase } from "../../utils/supabase";
 
 const coalesce = (...values) =>
@@ -147,24 +148,25 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [noSession, setNoSession] = useState(false);
 
-  const loadUser = useCallback(async () => {
+  const loadUser = useCallback(async ({ refreshing: isRefreshing = false } = {}) => {
     try {
-      setError("");
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      const token = session?.access_token;
-
-      if (!token) {
-        setUser(null);
-        setError("No active session. Please sign in again.");
-        return;
+      if (isRefreshing) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
       }
 
-      await setToken(token);
+      setError("");
+      setNoSession(false);
+
+      const token = await getActiveSessionToken();
+      if (!token) {
+        setUser(null);
+        setNoSession(true);
+        return;
+      }
 
       const [authResponse, profileRow] = await Promise.all([
         API.get("/auth/me"),
@@ -176,8 +178,8 @@ export default function Profile() {
 
       setUser(normalizeProfile(authUser, profileRow, holidaySummary));
     } catch (loadError) {
-      if (loadError.response?.status === 401) {
-        setError("Your session expired. Please sign in again.");
+      if (isAuthError(loadError)) {
+        setNoSession(true);
       } else {
         setError("Profile could not be loaded. Pull to refresh or try again.");
       }
@@ -194,13 +196,11 @@ export default function Profile() {
   }, [loadUser]);
 
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    loadUser();
+    loadUser({ refreshing: true });
   }, [loadUser]);
 
   async function handleLogout() {
-    await removeToken();
-    await supabase.auth.signOut({ scope: "local" });
+    await clearLocalSession();
     router.replace("/login");
   }
 
@@ -216,6 +216,10 @@ export default function Profile() {
         </View>
       </SafeAreaView>
     );
+  }
+
+  if (noSession) {
+    return <SignInRequired />;
   }
 
   const initials = user?.name

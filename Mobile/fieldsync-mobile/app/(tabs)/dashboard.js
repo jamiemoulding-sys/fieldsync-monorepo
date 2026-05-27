@@ -11,7 +11,9 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import SignInRequired from "../../components/SignInRequired";
 import { dashboardAPI } from "../../services/api";
+import { getActiveSessionToken, isAuthError } from "../../utils/authSession";
 
 const coalesce = (...values) =>
   values.find((value) => value !== undefined && value !== null && value !== "");
@@ -85,6 +87,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [noSession, setNoSession] = useState(false);
 
   const loadDashboard = useCallback(async ({ refreshing: isRefreshing = false } = {}) => {
     try {
@@ -95,13 +98,25 @@ export default function Dashboard() {
       }
 
       setError("");
+      setNoSession(false);
+
+      const token = await getActiveSessionToken();
+      if (!token) {
+        setProfile(null);
+        setTodayShift(null);
+        setWeekSchedule([]);
+        setWeekShifts([]);
+        setClockState({ activeShift: null, onBreak: false });
+        setNoSession(true);
+        return;
+      }
 
       const data = await dashboardAPI.getMobile();
       const user = data?.profile;
 
       if (!user) {
         setProfile(null);
-        setError("No active session. Please sign in again.");
+        setNoSession(true);
         return;
       }
 
@@ -122,6 +137,11 @@ export default function Dashboard() {
       setHolidaySummary(data.holiday_summary || { allowance: 0, remaining: 0 });
       setAnnouncement(data.announcement || null);
     } catch (loadError) {
+      if (isAuthError(loadError)) {
+        setProfile(null);
+        setNoSession(true);
+        return;
+      }
       setError(loadError.message || "Dashboard could not be loaded.");
     } finally {
       setLoading(false);
@@ -181,6 +201,10 @@ export default function Dashboard() {
         </View>
       </SafeAreaView>
     );
+  }
+
+  if (noSession) {
+    return <SignInRequired />;
   }
 
   return (

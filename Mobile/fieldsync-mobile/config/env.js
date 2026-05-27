@@ -5,7 +5,7 @@ const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   extra.apiUrl ||
-  "https://app.zorviatech.co.uk/api";
+  "https://fieldsync-backend-clean.onrender.com/api";
 
 export const SUPABASE_URL =
   process.env.EXPO_PUBLIC_SUPABASE_URL ||

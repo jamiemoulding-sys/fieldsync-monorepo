@@ -7,7 +7,7 @@ This checklist prepares the FieldSync Expo app for an internal TestFlight build 
 - App name: FieldSync
 - Expo slug: fieldsync-mobile
 - iOS bundle identifier: com.zorviatech.fieldsyncmobile
-- Production API URL in app config: https://app.zorviatech.co.uk/api
+- Production API URL in app config: https://fieldsync-backend-clean.onrender.com/api
 
 ## Required EAS Environment Variables
 

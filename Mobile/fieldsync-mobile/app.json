@@ -57,7 +57,7 @@
     },
     "extra": {
       "router": {},
-      "apiUrl": "https://app.zorviatech.co.uk/api",
+      "apiUrl": "https://fieldsync-backend-clean.onrender.com/api",
       "eas": {
         "projectId": "28d175ee-360d-4c51-b22c-00908ae68cee"
       }

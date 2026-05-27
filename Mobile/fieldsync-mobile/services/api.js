@@ -8,6 +8,8 @@ const API = axios.create({
   timeout: 10000,
 });
 
+console.log("FieldSync API base URL:", API_BASE_URL);
+
 API.interceptors.request.use(async (config) => {
   const {
     data: { session },

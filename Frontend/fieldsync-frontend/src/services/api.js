@@ -119,8 +119,50 @@ USERS
 
 export const userAPI = {
   getAll: async () => {
-    const res = await api.get("/users");
-    return res.data || [];
+    const endpoint = "/users";
+
+    try {
+      const res = await api.get(endpoint);
+      const payload = res.data;
+      const users = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.users)
+          ? payload.users
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+      if (
+        !Array.isArray(payload) &&
+        !Array.isArray(payload?.users) &&
+        !Array.isArray(payload?.data)
+      ) {
+        console.warn("FieldSync users API returned unexpected payload", {
+          endpoint,
+          status: res.status,
+          companyId: res.headers?.["x-fieldsync-company-id"] || null,
+          payloadType: typeof payload,
+        });
+      }
+
+      console.info("FieldSync users API loaded", {
+        endpoint,
+        status: res.status,
+        companyId: res.headers?.["x-fieldsync-company-id"] || null,
+        count: users.length,
+      });
+
+      return users;
+    } catch (error) {
+      console.error("FieldSync users API failed", {
+        endpoint,
+        status: error.response?.status || null,
+        companyId: error.response?.headers?.["x-fieldsync-company-id"] || null,
+        message: error.userMessage || error.message,
+      });
+
+      throw error;
+    }
   },
 
   getById: async (id) => {

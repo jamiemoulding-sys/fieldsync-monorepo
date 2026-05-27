@@ -10,14 +10,13 @@
 ✅ Table + Grid view
 */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { userAPI, inviteAPI } from "../services/api";
 import { motion } from "framer-motion";
 
 import {
   Users,
-  Search,
   Trash2,
   UserPlus,
   RefreshCw,
@@ -37,6 +36,7 @@ export default function Employees() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
   const [view, setView] = useState("table");
@@ -49,19 +49,47 @@ export default function Employees() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("employee");
 
-  useEffect(() => {
-    load();
-  }, []);
+  const load = useCallback(async () => {
+    const endpoint = "/users";
 
-  async function load() {
     try {
       setLoading(true);
+      setError("");
       const data = await userAPI.getAll();
-      setRows(Array.isArray(data) ? data : []);
+
+      if (!Array.isArray(data)) {
+        throw new Error("Employee list returned an unexpected response");
+      }
+
+      setRows(data);
+    } catch (err) {
+      const message =
+        err.userMessage ||
+        err.response?.data?.error ||
+        err.message ||
+        "Failed to load employees";
+
+      console.error("Employees page failed to load users", {
+        endpoint,
+        status: err.response?.status || null,
+        companyId:
+          err.response?.headers?.["x-fieldsync-company-id"] ||
+          user?.company_id ||
+          user?.companyId ||
+          null,
+        message,
+      });
+
+      setRows([]);
+      setError(message);
     } finally {
       setLoading(false);
     }
-  }
+  }, [user?.companyId, user?.company_id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const filtered = useMemo(() => {
     let data = [...rows];
@@ -210,6 +238,13 @@ async function saveEditor() {
 
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+          <p className="font-semibold">Could not load employees</p>
+          <p className="mt-1 text-red-100/80">{error}</p>
+        </div>
+      )}
 
       {/* KPI */}
       <div className="grid md:grid-cols-3 gap-4">

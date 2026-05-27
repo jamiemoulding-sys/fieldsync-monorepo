@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const { query } = require("../database/connection");
+const logger = require("../utils/logger");
 
 const {
   authenticateToken,
@@ -16,8 +17,20 @@ router.get(
   "/",
   authenticateToken,
   requireCompany,
+  requireRole("manager"),
   async (req, res) => {
+    const endpoint = "GET /api/users";
+    const companyId = req.user.company_id || req.user.companyId;
+
     try {
+      logger.info("Users list request", {
+        endpoint,
+        status: "started",
+        companyId,
+        userId: req.user.id,
+        role: req.user.role,
+      });
+
       const result = await query(
         `
         SELECT *
@@ -25,12 +38,27 @@ router.get(
         WHERE company_id = $1
         ORDER BY name ASC
         `,
-        [req.user.companyId]
+        [companyId]
       );
+
+      res.set("X-FieldSync-Endpoint", endpoint);
+      res.set("X-FieldSync-Company-Id", String(companyId));
+
+      logger.info("Users list response", {
+        endpoint,
+        status: 200,
+        companyId,
+        count: result.rows.length,
+      });
 
       res.json(result.rows);
     } catch (error) {
-      console.error("GET USERS ERROR:", error);
+      logger.error("GET USERS ERROR", error);
+      logger.warn("Users list failed", {
+        endpoint,
+        status: 500,
+        companyId,
+      });
 
       res.status(500).json({
         error: "Failed to fetch users",

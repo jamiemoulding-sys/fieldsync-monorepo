@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const { query } = require("../database/connection");
+const logger = require("../utils/logger");
 const {
   authenticateToken,
   requireCompany,
@@ -36,6 +37,42 @@ function getUsedHolidayDays(holidays, userId) {
   });
 
   return total;
+}
+
+const MOBILE_SECTION_TIMEOUT_MS = Number(
+  process.env.MOBILE_DASHBOARD_SECTION_TIMEOUT_MS || 3500
+);
+
+async function loadMobileDashboardSection(name, fallback, loader) {
+  const start = Date.now();
+  logger.info("Mobile dashboard section start", { section: name });
+
+  let timeoutId;
+  try {
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        const error = new Error(`${name} timed out`);
+        error.code = "SECTION_TIMEOUT";
+        reject(error);
+      }, MOBILE_SECTION_TIMEOUT_MS);
+    });
+
+    const value = await Promise.race([loader(), timeout]);
+    clearTimeout(timeoutId);
+    logger.info("Mobile dashboard section complete", {
+      section: name,
+      duration: Date.now() - start,
+    });
+    return { name, value, error: null };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    logger.warn("Mobile dashboard section fallback", {
+      section: name,
+      duration: Date.now() - start,
+      reason: error.code || error.message,
+    });
+    return { name, value: fallback, error: error.code || error.message };
+  }
 }
 
 //
@@ -361,15 +398,12 @@ router.get(
       const todayEnd = new Date(todayStart);
       todayEnd.setDate(todayEnd.getDate() + 1);
 
-      const [
-        todayScheduleRes,
-        weekScheduleRes,
-        weekShiftsRes,
-        activeShiftRes,
-        holidaysRes,
-        announcementRes,
-      ] = await Promise.all([
-        query(
+      const yearStart = new Date(todayStart.getFullYear(), 0, 1);
+      const yearEnd = new Date(todayStart.getFullYear() + 1, 0, 1);
+
+      const sections = await Promise.all([
+        loadMobileDashboardSection("today_schedule", { rows: [] }, () =>
+          query(
           `
           SELECT
             s.*,
@@ -396,8 +430,10 @@ router.get(
           LIMIT 1
           `,
           [userId, companyId, todayStart.toISOString(), todayEnd.toISOString()]
+          )
         ),
-        query(
+        loadMobileDashboardSection("week_schedule", { rows: [] }, () =>
+          query(
           `
           SELECT
             s.*,
@@ -421,10 +457,13 @@ router.get(
           AND s.start_time >= $3
           AND s.start_time < $4
           ORDER BY s.start_time ASC
+          LIMIT 20
           `,
           [userId, companyId, weekStart.toISOString(), weekEnd.toISOString()]
+          )
         ),
-        query(
+        loadMobileDashboardSection("week_shifts", { rows: [] }, () =>
+          query(
           `
           SELECT
             s.*,
@@ -443,11 +482,13 @@ router.get(
           AND s.company_id = $2
           AND s.clock_in_time >= $3
           ORDER BY s.clock_in_time DESC
-          LIMIT 80
+          LIMIT 40
           `,
           [userId, companyId, weekStart.toISOString()]
+          )
         ),
-        query(
+        loadMobileDashboardSection("active_shift", { rows: [] }, () =>
+          query(
           `
           SELECT *
           FROM shifts
@@ -458,17 +499,26 @@ router.get(
           LIMIT 1
           `,
           [userId, companyId]
+          )
         ),
-        query(
+        loadMobileDashboardSection("holidays", { rows: [] }, () =>
+          query(
           `
-          SELECT *
+          SELECT user_id, status, start_date, end_date
           FROM holidays
           WHERE company_id = $1
-          ORDER BY created_at DESC
+          AND user_id = $2
+          AND status = 'approved'
+          AND end_date >= $3
+          AND start_date < $4
+          ORDER BY start_date DESC
+          LIMIT 100
           `,
-          [companyId]
+          [companyId, userId, yearStart.toISOString(), yearEnd.toISOString()]
+          )
         ),
-        query(
+        loadMobileDashboardSection("announcement", { rows: [] }, () =>
+          query(
           `
           SELECT id, title, message, priority, expires_at, created_at
           FROM announcements
@@ -478,13 +528,31 @@ router.get(
           LIMIT 1
           `,
           [companyId]
+          )
         ),
       ]);
+
+      const sectionByName = Object.fromEntries(
+        sections.map((section) => [section.name, section])
+      );
+
+      const todayScheduleRes = sectionByName.today_schedule.value;
+      const weekScheduleRes = sectionByName.week_schedule.value;
+      const weekShiftsRes = sectionByName.week_shifts.value;
+      const activeShiftRes = sectionByName.active_shift.value;
+      const holidaysRes = sectionByName.holidays.value;
+      const announcementRes = sectionByName.announcement.value;
 
       const activeShift = activeShiftRes.rows[0] || null;
       const holidays = holidaysRes.rows || [];
       const allowance = getHolidayAllowance(req.user);
       const used = getUsedHolidayDays(holidays, userId);
+      const sectionErrors = sections
+        .filter((section) => section.error)
+        .map((section) => ({
+          section: section.name,
+          reason: section.error,
+        }));
 
       return res.json({
         profile: req.user,
@@ -501,6 +569,8 @@ router.get(
           remaining: Math.max(allowance - used, 0),
         },
         announcement: announcementRes.rows[0] || null,
+        partial: sectionErrors.length > 0,
+        section_errors: sectionErrors,
       });
     } catch (error) {
       console.error("MOBILE DASHBOARD ERROR:", error);

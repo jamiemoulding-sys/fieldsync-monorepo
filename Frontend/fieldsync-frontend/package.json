@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@fieldsync/shared": "file:../../shared",
     "@stripe/stripe-js": "^4.5.0",
     "@supabase/supabase-js": "^2.103.0",
     "@testing-library/dom": "^10.4.1",

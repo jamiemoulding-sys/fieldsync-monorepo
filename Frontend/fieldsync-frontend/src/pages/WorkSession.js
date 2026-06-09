@@ -17,7 +17,7 @@ import { useEffect, useState, useRef } from "react";
 import {
   haversineDistanceMeters,
   haversineDistanceMetersRounded,
-} from "../utils/geofence";
+} from "@fieldsync/shared";
 import { shiftAPI, locationAPI } from "../services/api";
 
 import {

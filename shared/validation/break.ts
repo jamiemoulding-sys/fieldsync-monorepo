@@ -1,4 +1,5 @@
-import { z } from "zod";
+import z from "zod";
+import { coercedNumber } from "./zod";
 
 /**
  * POST `/api/shifts/break/start` — requires active `shift_id`.
@@ -6,12 +7,12 @@ import { z } from "zod";
  */
 export const breakStartRequestSchema = z
   .object({
-    shift_id: z.union([z.coerce.number(), z.string().min(1)]),
+    shift_id: z.union([coercedNumber(), z.string().min(1)]),
     reason: z.string().trim().max(200).optional(),
     location: z
       .object({
-        latitude: z.coerce.number().finite().gte(-90).lte(90),
-        longitude: z.coerce.number().finite().gte(-180).lte(180),
+        latitude: coercedNumber(z.number().finite().gte(-90).lte(90)),
+        longitude: coercedNumber(z.number().finite().gte(-180).lte(180)),
       })
       .optional(),
   })
@@ -25,11 +26,11 @@ export type BreakStartRequestInput = z.infer<typeof breakStartRequestSchema>;
  */
 export const breakEndRequestSchema = z
   .object({
-    shift_id: z.union([z.coerce.number(), z.string().min(1)]),
+    shift_id: z.union([coercedNumber(), z.string().min(1)]),
     location: z
       .object({
-        latitude: z.coerce.number().finite().gte(-90).lte(90),
-        longitude: z.coerce.number().finite().gte(-180).lte(180),
+        latitude: coercedNumber(z.number().finite().gte(-90).lte(90)),
+        longitude: coercedNumber(z.number().finite().gte(-180).lte(180)),
       })
       .optional(),
   })

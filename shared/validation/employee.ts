@@ -1,4 +1,5 @@
-import { z } from "zod";
+import z from "zod";
+import { coercedNumber } from "./zod";
 
 /**
  * PUT `/api/users/:id` (`routes/users.js`) — all fields optional via SQL `COALESCE` patches.
@@ -13,12 +14,12 @@ export const employeeProfileUpdateSchema = z
     phone: z.string().trim().optional(),
     job_title: z.string().trim().optional(),
 
-    hourly_rate: z.coerce.number().finite().nonnegative().optional(),
-    overtime_rate: z.coerce.number().finite().nonnegative().optional(),
-    night_rate: z.coerce.number().finite().nonnegative().optional(),
+    hourly_rate: coercedNumber(z.number().finite().nonnegative()).optional(),
+    overtime_rate: coercedNumber(z.number().finite().nonnegative()).optional(),
+    night_rate: coercedNumber(z.number().finite().nonnegative()).optional(),
 
-    contracted_hours: z.coerce.number().finite().nonnegative().optional(),
-    holiday_allowance: z.coerce.number().finite().nonnegative().optional(),
+    contracted_hours: coercedNumber(z.number().finite().nonnegative()).optional(),
+    holiday_allowance: coercedNumber(z.number().finite().nonnegative()).optional(),
 
     department: z.string().trim().optional(),
     role: z.string().trim().optional(),

@@ -1,4 +1,5 @@
-import { z } from "zod";
+import z from "zod";
+import { coercedNumber } from "./zod";
 
 /**
  * POST `/api/schedules` (`routes/schedules.js`) — `user_id`, `date`, `start_time`, `end_time` required (truthy strings).
@@ -8,7 +9,7 @@ import { z } from "zod";
  */
 export const scheduleCreationSchema = z
   .object({
-    user_id: z.union([z.coerce.number(), z.string().min(1)]),
+    user_id: z.union([coercedNumber(), z.string().min(1)]),
 
     /** Usually `YYYY-MM-DD` from date inputs; backend stores as provided. */
     date: z.string().trim().min(1),
@@ -18,8 +19,8 @@ export const scheduleCreationSchema = z
     end_time: z.string().trim().min(1),
 
     /** Often present on Supabase-backed schedules even if older Express insert omits them. */
-    company_id: z.union([z.coerce.number(), z.string().min(1)]).optional(),
-    location_id: z.union([z.coerce.number(), z.string().min(1)]).optional(),
+    company_id: z.union([coercedNumber(), z.string().min(1)]).optional(),
+    location_id: z.union([coercedNumber(), z.string().min(1)]).optional(),
   })
   .strict();
 

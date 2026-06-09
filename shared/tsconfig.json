@@ -19,6 +19,7 @@
     "ignoreDeprecations": "5.0"
   },
   "include": [
+    "browser.ts",
     "index.ts",
     "types/**/*.ts",
     "utils/**/*.ts",

@@ -1,4 +1,5 @@
-import { z } from "zod";
+import z from "zod";
+import { coercedNumber } from "./zod";
 
 const isoDateLike = z
   .string()
@@ -17,7 +18,7 @@ export const leaveRequestCreateSchema = z
   .object({
     start_date: isoDateLike,
     end_date: isoDateLike,
-    user_id: z.union([z.coerce.number(), z.string().min(1)]).optional(),
+    user_id: z.union([coercedNumber(), z.string().min(1)]).optional(),
   })
   .strict()
   .refine(

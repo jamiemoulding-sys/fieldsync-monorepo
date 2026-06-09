@@ -17,7 +17,7 @@ import { useEffect, useState, useRef } from "react";
 import {
   haversineDistanceMeters,
   haversineDistanceMetersRounded,
-} from "@fieldsync/shared";
+} from "@fieldsync/shared/utils";
 import { shiftAPI, locationAPI } from "../services/api";
 
 import {

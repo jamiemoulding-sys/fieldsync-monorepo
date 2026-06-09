@@ -30,9 +30,9 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "cross-env CI=false react-scripts build",
-    "test": "react-scripts test",
+    "start": "craco start",
+    "build": "cross-env CI=false craco build",
+    "test": "craco test",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
@@ -55,6 +55,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
+    "@craco/craco": "^7.1.0",
     "autoprefixer": "^10.4.27",
     "cross-env": "^10.1.0",
     "postcss": "^8.5.9",

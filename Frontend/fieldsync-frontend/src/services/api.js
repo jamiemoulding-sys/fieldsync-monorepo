@@ -24,6 +24,8 @@ const api = axios.create({
   withCredentials: false,
 });
 
+console.log("FieldSync API base URL:", API_BASE_URL);
+
 api.interceptors.request.use(async (config) => {
   const {
     data: { session },
